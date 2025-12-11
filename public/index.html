@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Open Inventory</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    :root { font-family: system-ui, sans-serif; }
+    body { max-width: 1000px; margin: 32px auto; padding: 0 16px; }
+    h1 { margin-bottom: 8px; }
+    .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    input, button { padding: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f5f5f5; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
+    .available { background: #e6ffed; color: #0a7a2f; border: 1px solid #a8e6b0; }
+    .allocated { background: #fff4e5; color: #8a4b0f; border: 1px solid #f3cf9e; }
+    .actions { display: flex; gap: 6px; }
+    .error { color: #c62828; margin-top: 8px; }
+    .success { color: #2e7d32; margin-top: 8px; }
+    .muted { color: #555; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Open Options</h1>
+
+  <div class="controls">
+    <input id="search" type="text" placeholder="Search by name or serial" />
+    <form id="create-form" onsubmit="return false;">
+      <input id="new-name" type="text" placeholder="Symbol name" required />
+      <input id="new-serial" type="text" placeholder="Token (unique)" required />
+      <input id="new-strike" type="text" placeholder="Strike" required />
+      <button id="create-btn">Add Symbol</button>
+    </form>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Symbol</th>
+        <th>Token</th>
+        <th>Status</th>
+        <th>Strike</th>
+        <th>Quantity</th>
+        <th>Bought At</th>
+        <th>Expires At</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+  <!-- Put script here, not inside the table -->
+  <script src="/app.js"></script>
+</body>
+</html>

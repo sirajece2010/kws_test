@@ -48,14 +48,20 @@ export async function init() {
   await run(`
     CREATE TABLE IF NOT EXISTS devices (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      underlying TEXT NOT NULL,
       symbol TEXT NOT NULL,
       strike TEXT,
       token TEXT NOT NULL UNIQUE,
+      type TEXT,
       quantity TEXT,
+      avg_price TEXT,
+      ltp TEXT,
+      booked TEXT,
+      unbooked TEXT,
       stop_loss TEXT,
       allocated_to TEXT,              -- NULL when available
       allocated_at TEXT,              -- ISO timestamp when allotted
-      allocated_until TEXT,           -- ISO timestamp when to release
+      expiry TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
@@ -66,10 +72,10 @@ export async function init() {
   const countRow = await get(`SELECT COUNT(*) AS c FROM devices`);
   if ((countRow?.c ?? 0) === 0) {
     const seed = [
-      ['Raspberry Pi 4 (4GB)', 'RPI4-4001']
+      ['GIFT NIFTY', 'Tradingsymbol1', '12345']
     ];
-    for (const [symbol, token] of seed) {
-      await run(`INSERT INTO devices (symbol, token) VALUES (?, ?)`, [symbol, token]);
+    for (const [underlying, symbol, token] of seed) {
+      await run(`INSERT INTO devices (underlying, symbol, token) VALUES (?, ?, ?)`, [underlying,symbol, token]);
     }
     console.log('Seeded example devices');
   }

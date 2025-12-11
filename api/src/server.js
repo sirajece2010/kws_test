@@ -76,6 +76,9 @@ app.post('/api/devices', async (req, res, next) => {
     if (typeof quantity !== 'string' || !quantity.trim()) {
       return res.status(400).json({ error: 'quantity is either empty or not string' });
     }
+    if (isNaN(Number(quantity.trim()))) {
+      return res.status(400).json({ error: 'quantity must be a valid number string' });
+    }
     try {
       const { lastID } = await run(
         `INSERT INTO devices (symbol, token, strike, quantity) VALUES (?, ?, ?, ?)`,
@@ -169,35 +172,59 @@ app.put('/api/devices/:id/chown', async (req, res, next) => {
   }
 });
 
+
 // -------- Allocation actions --------
+// list portfolio
+app.get('/api/portfolio', async (_req, res, next) => {
+  try {
+    const { portfolioData, instrumentData } = await portfolioDetails();
+    // console.log('portfolioData:', JSON.stringify(portfolioData)); // <-- debug log
+    // console.log('instrumentData:', JSON.stringify(instrumentData)); // <-- debug log
+    const transformedRows = transformPortfolioResponse(portfolioData);
+    const instrumentInfo = transformInstrumentInfo(instrumentData);
+    const combined = enrichPortfolioWithInstruments(transformedRows, instrumentInfo);
+    // console.log('combined:', JSON.stringify(combined)); // <-- debug log
+    res.json(combined);
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Allot device to a username
 app.post('/api/devices/:id/allot', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { username } = req.body;
-    const hours = '4';
+    const { quantity } = req.body;
+
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid ID' });
-    if (typeof username !== 'string' || !username.trim()) {
-      return res.status(400).json({ error: 'username is required' });
+    if (typeof quantity !== 'string' || !quantity.trim()) {
+      return res.status(400).json({ error: 'quantity is required' });
+    }
+    if (isNaN(Number(quantity.trim()))) {
+      return res.status(400).json({ error: 'quantity must be a valid number string' });
     }
 
-   // Default duration = 5 hours if not provided or invalid
-    const durationHours = Number.isFinite(Number(hours)) && Number(hours) > 0 ? Number(hours) : 5;
+    // Fetch device data
+    const data = await get(`SELECT symbol, quantity FROM devices WHERE id = ?`, [id]);
+    console.log('Device data:', data); // <-- debug log
+    if (!data) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
 
-    // Only allot if currently unallocated (optimistic concurrency)
+    createOrderPayload("SELL", data.symbol, quantity, '256');
+
+    // Update local DB to reduce quantity
     const { changes } = await run(
       `UPDATE devices
-       SET allocated_to = ?, allocated_at = datetime('now'),
-       allocated_until = datetime('now', '+' || ? || ' hours')
-       WHERE id = ? AND allocated_to IS NULL`,
-      [username.trim(), durationHours, id]
+       SET quantity = quantity - ?
+       WHERE id = ?`,
+      [quantity.trim(), id]
     );
     if (changes === 0) {
-      // either not found or already allocated
+      // either not found or quantity not updated
       const exists = await get(`SELECT id FROM devices WHERE id = ?`, [id]);
       if (!exists) return res.status(404).json({ error: 'Not found' });
-      return res.status(409).json({ error: 'Device is already allocated' });
+      return res.status(409).json({ error: 'quantity is not updated' });
     }
 
     const row = await get(`SELECT * FROM devices WHERE id = ?`, [id]);
@@ -246,6 +273,174 @@ app.delete('/api/devices/:id', async (req, res, next) => {
   }
 });
 
+// Sample function to validate device fields
+function validateDeviceFields(symbol, token, strike, quantity) {
+  if (typeof symbol !== 'string' || !symbol.trim()) {
+    return { valid: false, error: 'symbol is required' };
+  }
+  if (typeof token !== 'string' || !token.trim()) {
+    return { valid: false, error: 'token is required' };
+  }
+  if (typeof strike !== 'string' || !strike.trim()) {
+    return { valid: false, error: 'strike is required' };
+  }
+  if (typeof quantity !== 'string' || !quantity.trim()) {
+    return { valid: false, error: 'quantity is required' };
+  }
+  if (isNaN(Number(quantity.trim()))) {
+    return { valid: false, error: 'quantity must be a valid number' };
+  }
+  return { valid: true };
+}
+
+// Function calls
+async function createOrderPayload(action, symbol, quantity, price) {
+  // Implementation here
+  const callbackUrl = 'https://oxide.sensibull.com/v1/compute/vt2/order'; // <-- paper trading endpoint
+  const payload = {
+    orders: [
+    {
+      action: action,
+      lot_size: 20,
+      origin: "PAPER_NEW",
+      price: (Number(price.trim())),
+      product_type: "NRML",
+      quantity: action === "SELL" ? -(Number(quantity.trim())) : Number(quantity.trim()),
+      tradingsymbol: symbol,
+      timestamp: new Date().toISOString()
+    }
+    ],
+    paper_trade_group_id: "019b0673-eb1e-7162-9e77-3658c1a640ec"
+  };
+
+    try {
+      const resp = await fetch(callbackUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=2INc07AHkwRqYDahHqjq1GoVy6JWDhZDb5U9ZGLvnGU' },
+        body: JSON.stringify(payload),
+      });
+      ////////////////////// Debugging info //////////////////////
+      /*const cloned = resp.clone();
+      const respText = await cloned.text().catch(() => '<unreadable>');
+      console.log('Upstream response:', {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
+        body: respText
+      });*/
+      ////////////////////////////////////////////////////////////
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '<unreadable>');
+        return console.log(JSON.stringify({ error: resp.statusText, details: text }));
+      }
+    } catch (e) {
+      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+    }
+}
+
+async function portfolioDetails() {
+  // Implementation here
+  const portfolioId = '019b0673-eb1e-7162-9e77-364f165cff34';
+  const Url = 'https://oxide.sensibull.com/v1/compute/vt2/portfolio_details/' + portfolioId; // <-- paper trading endpoint
+  const payload = {
+    "is_initial_load":true,
+    "expanded_groups":[],
+    "hide_closed_positions":false,
+    "unchecked_groups":[],
+    "unchecked_positions_per_group":{},
+    "order_book_groups":[]
+  };
+
+    try {
+      const resp = await fetch(Url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=2INc07AHkwRqYDahHqjq1GoVy6JWDhZDb5U9ZGLvnGU' },
+        body: JSON.stringify(payload),
+      });
+      ////////////////////// Debugging info //////////////////////
+      const cloned = resp.clone();
+      const respText = await cloned.text().catch(() => '<unreadable>');
+      const respJson = JSON.parse(respText);
+      const groups = respJson.payload.groups[0] || {};
+      //const symbolInfo = Object.values(groups.positions_per_underlying[0].positions || {}).find(pos => pos.tradingsymbol === symbol);
+      /*console.log('Upstream response:', {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
+        body: respText,
+        position: JSON.stringify(groups.positions_per_underlying || {}  ),
+        Instru_info: JSON.stringify(respJson.payload.instrument_info || {})
+      });*/
+      ////////////////////////////////////////////////////////////
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '<unreadable>');
+        return console.log(JSON.stringify({ error: resp.statusText, details: text }));
+      }
+      const portfolioData = respJson.payload.groups[0].positions_per_underlying || {};
+      const instrumentData = respJson.payload.instrument_info || {};
+      return { portfolioData, instrumentData };
+    } catch (e) {
+      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+    }
+}
+
+function transformPortfolioResponse(apiResponse) {
+  const positions = [];
+  Object.values(apiResponse).forEach((underlyingData) => {
+    const underlying = underlyingData.underlying;
+    const positionsList = underlyingData.positions || [];
+    positionsList.forEach((pos) => {
+      positions.push({ ...pos, underlying });
+    });
+  });
+  //console.log('positions:', JSON.stringify(positions)); // <-- debug log
+
+  return positions.map((pos, index) => ({
+    id: index + 1,
+    underlying: pos.underlying,
+    symbol: pos.tradingsymbol,
+    quantity: pos.open_qty,
+    avg_price: pos.avg_price,
+    ltp: pos.ltp,
+    booked: Math.round(pos.realised_pnl),
+    unbooked: Math.round(pos.unrealised_pnl),
+    stop_loss: pos.open_qty < 0 ? Math.round(pos.avg_price * 1.5 * 20) / 20 : Math.round(pos.avg_price * 0.5 * 20) / 20
+  }));
+}
+
+function transformInstrumentInfo(apiResponse) {
+  return Object.values(apiResponse).map(inst => ({
+    symbol: inst.tradingsymbol,
+    expiry: inst.expiry,
+    strike: inst.strike,
+    token: inst.instrument_token,
+    ltp: inst.ltp,
+    inst_type: inst.instrument_type,
+    lot_size: inst.lot_size
+  }));
+}
+
+function enrichPortfolioWithInstruments(portfolio, instrumentInfo) {
+  // Convert instrumentInfo array to a map keyed by symbol for O(1) lookup
+  const instInfoMap = {};
+  instrumentInfo.forEach(inst => {
+    instInfoMap[inst.symbol] = inst;
+  });
+
+  // Merge portfolio with instrument info
+  return portfolio.map(pos => {
+    const instInfo = instInfoMap[pos.symbol] || {};
+    return {
+      ...pos,
+      expiry: instInfo.expiry || null,
+      strike: instInfo.strike || pos.strike,
+      token: instInfo.token || null,
+      type: instInfo.inst_type || null,
+      lot_size: instInfo.lot_size || null,
+      is_expired: instInfo.is_expired || false
+    };
+  });
+}
 
 // Global error handler
 app.use((err, _req, res, _next) => {

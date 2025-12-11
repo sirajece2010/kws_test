@@ -12,7 +12,7 @@
     input, button { padding: 8px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background: #f5f5f5; }
+    th { background: #c68e8e; }
     .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; }
     .available { background: #e6ffed; color: #0a7a2f; border: 1px solid #a8e6b0; }
     .allocated { background: #fff4e5; color: #8a4b0f; border: 1px solid #f3cf9e; }
@@ -31,6 +31,7 @@
       <input id="new-name" type="text" placeholder="Symbol name" required />
       <input id="new-serial" type="text" placeholder="Token (unique)" required />
       <input id="new-strike" type="text" placeholder="Strike" required />
+      <input id="new-quantity" type="text" placeholder="Quantity" required />
       <button id="create-btn">Add Symbol</button>
     </form>
     <span id="status" class="muted"></span>
@@ -39,14 +40,20 @@
   <table>
     <thead>
       <tr>
-        <th>ID</th>
+        <th>S.No</th>
         <th>Symbol</th>
-        <th>Token</th>
+        <th>Inst_Token</th>
+        <th>Type</th>
         <th>Status</th>
         <th>Strike</th>
         <th>Quantity</th>
-        <th>Bought At</th>
-        <th>Expires At</th>
+        <th>Avg Price</th>
+        <th>LTP</th>
+        <th>Booked P&L</th>
+        <th>Unbooked P&L</th>
+        <th>Stop Loss</th>
+        <th>Open_on</th>
+        <th>Expires__on</th>
         <th>Actions</th>
       </tr>
     </thead>

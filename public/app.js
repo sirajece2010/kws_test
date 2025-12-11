@@ -6,6 +6,7 @@ const createForm = document.getElementById('create-form');
 const newName = document.getElementById('new-name');
 const newSerial = document.getElementById('new-serial');
 const newStrike = document.getElementById('new-strike');
+const newQuantity = document.getElementById('new-quantity');
 const createBtn = document.getElementById('create-btn');
 const statusEl = document.getElementById('status');
 
@@ -17,10 +18,11 @@ createBtn.addEventListener('click', async () => {
   const symbol = newName.value.trim();
   const token = newSerial.value.trim();
   const strike = newStrike.value.trim();
+  const quantity = newQuantity.value.trim();
   if (!symbol || !token) return setStatus('Symbol and Token are required', true);
 
   try {
-    await postJSON(`${API}/devices`, { symbol, token, strike});
+    await postJSON(`${API}/devices`, { symbol, token, strike, quantity });
     newName.value = ''; newSerial.value = '';
     await refresh();
     setStatus('Instrument added', false);
@@ -31,7 +33,8 @@ createBtn.addEventListener('click', async () => {
 
 async function refresh() {
   try {
-    devices = await getJSON(`${API}/devices`);
+    //devices = await getJSON(`${API}/devices`);
+    devices = await getJSON(`${API}/portfolio`);;
     render();
   } catch (e) {
     setStatus(parseError(e), true);
@@ -47,51 +50,58 @@ function render() {
   tbody.innerHTML = '';
   rows.forEach(d => {
     const tr = document.createElement('tr');
+    tr.style.backgroundColor = d.unbooked > 0 ? '#e8f5e9' : d.unbooked < 0 ? '#ffebee' : '#ffffff';
 
     tr.appendChild(td(d.id));
     tr.appendChild(td(d.symbol));
     tr.appendChild(td(d.token));
+    tr.appendChild(td(d.type ? d.quantity > 0 ? 'BUY' : 'SELL' : '—'));
 
     const statusTd = document.createElement('td');
-    const allocated = !!d.allocated_to;
+    const allocated = !!(d.quantity && d.quantity !== 0);
     const hasstrike = !!d.strike;
     const badge = document.createElement('span');
     badge.className = `badge ${allocated ? 'allocated' : 'available'}`;
-    badge.textContent = allocated ? 'Closed' : 'Open';
+    badge.textContent = allocated ? 'Open' : 'Closed';
     statusTd.appendChild(badge);
     tr.appendChild(statusTd);
 
     tr.appendChild(td(d.strike|| '—'));
     tr.appendChild(td(d.quantity|| '—'));
+    tr.appendChild(td(d.avg_price|| '0'));
+    tr.appendChild(td(d.ltp|| '—'));
+    tr.appendChild(td(d.booked|| '0'));
+    tr.appendChild(td(d.unbooked|| '0'));
+    tr.appendChild(td(d.stop_loss|| '—'));
     tr.appendChild(td(d.allocated_at ? new Date(d.allocated_at + 'Z').toLocaleString() : '—'));
-    tr.appendChild(td(d.allocated_until ? new Date(d.allocated_until + 'Z').toLocaleString() : '—'));
+    tr.appendChild(td(d.expiry|| '—'));
 
     const actionsTd = document.createElement('td');
     actionsTd.className = 'actions';
-    const allotBtn = document.createElement('button');
-    allotBtn.textContent = 'Allot';
-    allotBtn.disabled = allocated;
-    allotBtn.onclick = async () => {
-      const username = prompt('Allot to username (e.g., siraj.kamsa)');
-      if (!username || !username.trim()) return;
+    const addBtn = document.createElement('button');
+    addBtn.textContent = 'SELL More';
+    addBtn.disabled = !allocated;
+    addBtn.onclick = async () => {
+      const lot = prompt('How many lots to sell?');
+      if (!quantity || !quantity.trim()) return;
       try {
-        await postJSON(`${API}/devices/${d.id}/allot`, { username: username.trim() });
+        await postJSON(`${API}/devices/${d.id}/allot`, { quantity: quantity.trim() });
         await refresh();
-        setStatus(`Allotted ${d.serial} to ${username.trim()}`, false);
+        setStatus(`Added ${quantity.trim()} lots of ${d.symbol}`, false);
       } catch (e) {
         setStatus(parseError(e), true);
       }
     };
 
-    const releaseBtn = document.createElement('button');
-    releaseBtn.textContent = 'Release';
-    releaseBtn.disabled = !allocated;
-    releaseBtn.onclick = async () => {
-      if (!confirm(`Release ${d.serial}?`)) return;
+    const exitBtn = document.createElement('button');
+    exitBtn.textContent = 'Exit';
+    exitBtn.disabled = !allocated;
+    exitBtn.onclick = async () => {
+      if (!confirm(`Exit ${d.symbol}?`)) return;
       try {
         await postJSON(`${API}/devices/${d.id}/release`, {});
         await refresh();
-        setStatus(`Released ${d.serial}`, false);
+        setStatus(`Exited ${d.symbol}`, false);
       } catch (e) {
         setStatus(parseError(e), true);
       }
@@ -112,8 +122,8 @@ function render() {
     };
     
 
-    actionsTd.appendChild(allotBtn);
-    actionsTd.appendChild(releaseBtn);
+    actionsTd.appendChild(addBtn);
+    actionsTd.appendChild(exitBtn);
     actionsTd.appendChild(chownBtn);
     tr.appendChild(actionsTd);
 

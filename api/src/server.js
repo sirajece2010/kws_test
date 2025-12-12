@@ -4,6 +4,7 @@ import morgan from 'morgan';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { init, all, get, run } from './db.js';
+import OTPLib from 'otplib';
 
 const app = express();
 app.use(morgan('dev'));
@@ -17,8 +18,12 @@ const publicDir = path.resolve(__dirname, '../../public');
 console.log('Serving static from:', publicDir); // <-- add this for debug
 app.use(express.static(publicDir))
 
-
 await init();
+
+// Global vairables
+globalThis.portfolioId = '019b0673-eb1e-7162-9e77-364f165cff34';
+globalThis.accessToken = 'h_krbpIO34uBe2gbZi5U371hJdZFu3qyRuOLtNUfac0'
+globalThis.paperTradeGroupId = '019b0673-eb1e-7162-9e77-3658c1a640ec';
 
 // Health check
 app.get('/api/health', async (_req, res) => {
@@ -27,6 +32,47 @@ app.get('/api/health', async (_req, res) => {
     res.json({ status: 'ok', db: 'connected' });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.post('/api/authenticate', async (req, res, next) => {
+  try {
+    const { secretkey } = req.body;
+    if (typeof secretkey !== 'string' || !secretkey.trim()) {
+      return res.status(400).json({ error: 'secretkey is required' });
+    }
+    const code = OTPLib.authenticator.generate(secretkey.trim());
+    console.log('Generated OTP code:', code); // <-- debug log
+
+    // Example usage with Sensibull API key (replace with actual logic as needed)
+    const url = 'https://kite.zerodha.com/connect/login';
+    const sensibullApiKey = 'uf8cguv719djhxfc';
+    const params = {
+      api_key: sensibullApiKey,
+      v: 3,
+      redirect_params: 'redirect_url=https://web.sensibull.com/home'
+    };
+
+    const resp = await fetch(url + '?' + new URLSearchParams(params), {
+      method: 'GET',
+    });
+    ////////////////////// Debugging info //////////////////////
+    console.log('Sensibull API response:', {
+      status: resp.status,
+      statusText: resp.statusText,
+      headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
+      cookies: resp.headers.get('set-cookie') || 'none',
+      //body: await resp.text().catch(() => '<unreadable>')
+    });
+    ////////////////////////////////////////////////////////////
+
+    if (!resp) {
+      return res.status(500).json({ error: 'Failed to contact Sensibull API' });
+    }
+
+    res.json({ code });
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -46,19 +92,6 @@ app.get('/api/devices', async (_req, res, next) => {
   }
 });
 
-// Get one device
-app.get('/api/devices/:id', async (req, res, next) => {
-  try {
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid ID' });
-
-    const row = await get(`SELECT * FROM devices WHERE id = ?`, [id]);
-    if (!row) return res.status(404).json({ error: 'Not found' });
-    res.json(row);
-  } catch (err) {
-    next(err);
-  }
-});
 
 // Create device
 app.post('/api/devices', async (req, res, next) => {
@@ -190,11 +223,11 @@ app.get('/api/portfolio', async (_req, res, next) => {
   }
 });
 
-// Allot device to a username
-app.post('/api/devices/:id/allot', async (req, res, next) => {
+// add more lots to the existing
+app.post('/api/devices/:id/addmore', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { quantity } = req.body;
+    const { symbol, quantity, price, lot_size, type } = req.body;
 
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid ID' });
     if (typeof quantity !== 'string' || !quantity.trim()) {
@@ -203,29 +236,7 @@ app.post('/api/devices/:id/allot', async (req, res, next) => {
     if (isNaN(Number(quantity.trim()))) {
       return res.status(400).json({ error: 'quantity must be a valid number string' });
     }
-
-    // Fetch device data
-    const data = await get(`SELECT symbol, quantity FROM devices WHERE id = ?`, [id]);
-    console.log('Device data:', data); // <-- debug log
-    if (!data) {
-      return res.status(404).json({ error: 'Device not found' });
-    }
-
-    createOrderPayload("SELL", data.symbol, quantity, '256');
-
-    // Update local DB to reduce quantity
-    const { changes } = await run(
-      `UPDATE devices
-       SET quantity = quantity - ?
-       WHERE id = ?`,
-      [quantity.trim(), id]
-    );
-    if (changes === 0) {
-      // either not found or quantity not updated
-      const exists = await get(`SELECT id FROM devices WHERE id = ?`, [id]);
-      if (!exists) return res.status(404).json({ error: 'Not found' });
-      return res.status(409).json({ error: 'quantity is not updated' });
-    }
+    const ret = createOrderPayload(type, symbol, quantity, price, lot_size);
 
     const row = await get(`SELECT * FROM devices WHERE id = ?`, [id]);
     res.json(row);
@@ -294,29 +305,30 @@ function validateDeviceFields(symbol, token, strike, quantity) {
 }
 
 // Function calls
-async function createOrderPayload(action, symbol, quantity, price) {
+async function createOrderPayload(action, symbol, lots, price, lot_size) {
   // Implementation here
+  const quantity = Number(lots.trim()) * Number(lot_size);
   const callbackUrl = 'https://oxide.sensibull.com/v1/compute/vt2/order'; // <-- paper trading endpoint
   const payload = {
     orders: [
     {
       action: action,
-      lot_size: 20,
+      lot_size: (Number(quantity)),
       origin: "PAPER_NEW",
-      price: (Number(price.trim())),
+      price: (Number(price)),
       product_type: "NRML",
-      quantity: action === "SELL" ? -(Number(quantity.trim())) : Number(quantity.trim()),
+      quantity: action === "SELL" ? -(Number(quantity)) : (Number(quantity)),
       tradingsymbol: symbol,
       timestamp: new Date().toISOString()
     }
     ],
-    paper_trade_group_id: "019b0673-eb1e-7162-9e77-3658c1a640ec"
+    paper_trade_group_id: paperTradeGroupId
   };
 
     try {
       const resp = await fetch(callbackUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=2INc07AHkwRqYDahHqjq1GoVy6JWDhZDb5U9ZGLvnGU' },
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
         body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////
@@ -333,6 +345,9 @@ async function createOrderPayload(action, symbol, quantity, price) {
         const text = await resp.text().catch(() => '<unreadable>');
         return console.log(JSON.stringify({ error: resp.statusText, details: text }));
       }
+      const respJson = await resp.json().catch(() => null);
+      //console.log(JSON.stringify({ status: 'success', response: respJson }));
+      return { status: 'success', response: respJson };
     } catch (e) {
       return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
     }
@@ -340,7 +355,6 @@ async function createOrderPayload(action, symbol, quantity, price) {
 
 async function portfolioDetails() {
   // Implementation here
-  const portfolioId = '019b0673-eb1e-7162-9e77-364f165cff34';
   const Url = 'https://oxide.sensibull.com/v1/compute/vt2/portfolio_details/' + portfolioId; // <-- paper trading endpoint
   const payload = {
     "is_initial_load":true,
@@ -354,7 +368,7 @@ async function portfolioDetails() {
     try {
       const resp = await fetch(Url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=2INc07AHkwRqYDahHqjq1GoVy6JWDhZDb5U9ZGLvnGU' },
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
         body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////

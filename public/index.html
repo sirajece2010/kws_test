@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <style>
     :root { font-family: system-ui, sans-serif; }
-    body { max-width: 1000px; margin: 32px auto; padding: 0 16px; }
+    body { max-width: 1000px auto; margin: 32px auto; padding: 0 8px; }
     h1 { margin-bottom: 8px; }
     .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
     input, button { padding: 8px; }
@@ -33,6 +33,7 @@
       <input id="new-strike" type="text" placeholder="Strike" required />
       <input id="new-quantity" type="text" placeholder="Quantity" required />
       <button id="create-btn">Add Symbol</button>
+      <button id="auth-btn">Authenticate</button>
     </form>
     <span id="status" class="muted"></span>
   </div>
@@ -53,7 +54,7 @@
         <th>Unbooked P&L</th>
         <th>Stop Loss</th>
         <th>Open_on</th>
-        <th>Expires__on</th>
+        <th>Expires_on</th>
         <th>Actions</th>
       </tr>
     </thead>

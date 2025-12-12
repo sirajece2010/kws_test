@@ -8,6 +8,7 @@ const newSerial = document.getElementById('new-serial');
 const newStrike = document.getElementById('new-strike');
 const newQuantity = document.getElementById('new-quantity');
 const createBtn = document.getElementById('create-btn');
+const authBtn = document.getElementById('auth-btn');
 const statusEl = document.getElementById('status');
 
 let devices = [];
@@ -31,9 +32,21 @@ createBtn.addEventListener('click', async () => {
   }
 });
 
+authBtn.addEventListener('click', async () => {
+  try {
+    const secretKey = prompt('Enter the secret key to Authenticate:');
+
+    const res = await postJSON(`${API}/authenticate`, { secretkey: secretKey });
+    setStatus(`Authentication Code: ${res.code}`, false);
+  } catch (e) {
+    setStatus(parseError(e), true);
+  }
+});
+
 async function refresh() {
   try {
     //devices = await getJSON(`${API}/devices`);
+    console.log('Fetching portfolio data...');
     devices = await getJSON(`${API}/portfolio`);;
     render();
   } catch (e) {
@@ -52,10 +65,11 @@ function render() {
     const tr = document.createElement('tr');
     tr.style.backgroundColor = d.unbooked > 0 ? '#e8f5e9' : d.unbooked < 0 ? '#ffebee' : '#ffffff';
 
+    const ordertype = d.type ? d.quantity > 0 ? 'BUY' : 'SELL' : '—';
     tr.appendChild(td(d.id));
     tr.appendChild(td(d.symbol));
     tr.appendChild(td(d.token));
-    tr.appendChild(td(d.type ? d.quantity > 0 ? 'BUY' : 'SELL' : '—'));
+    tr.appendChild(td(ordertype));
 
     const statusTd = document.createElement('td');
     const allocated = !!(d.quantity && d.quantity !== 0);
@@ -79,15 +93,15 @@ function render() {
     const actionsTd = document.createElement('td');
     actionsTd.className = 'actions';
     const addBtn = document.createElement('button');
-    addBtn.textContent = 'SELL More';
+    addBtn.textContent = 'Add';
     addBtn.disabled = !allocated;
     addBtn.onclick = async () => {
-      const lot = prompt('How many lots to sell?');
-      if (!quantity || !quantity.trim()) return;
+      const losts = prompt('How many lots to add?');
+      if (!losts || !losts.trim()) return;
       try {
-        await postJSON(`${API}/devices/${d.id}/allot`, { quantity: quantity.trim() });
+        await postJSON(`${API}/devices/${d.id}/addmore`, { symbol: d.symbol, quantity: losts.trim(), price: d.ltp, lot_size: d.lot_size, type: ordertype });
         await refresh();
-        setStatus(`Added ${quantity.trim()} lots of ${d.symbol}`, false);
+        setStatus(`Added ${losts.trim()} lots of ${d.symbol}`, false);
       } catch (e) {
         setStatus(parseError(e), true);
       }

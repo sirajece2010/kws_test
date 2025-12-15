@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { init, all, get, run } from './db.js';
 import OTPLib from 'otplib';
+import { runInThisContext } from 'vm';
 
 const app = express();
 app.use(morgan('dev'));
@@ -21,9 +22,9 @@ app.use(express.static(publicDir))
 await init();
 
 // Global vairables
-globalThis.portfolioId = '019b0673-eb1e-7162-9e77-364f165cff34';
-globalThis.accessToken = 'h_krbpIO34uBe2gbZi5U371hJdZFu3qyRuOLtNUfac0'
-globalThis.paperTradeGroupId = '019b0673-eb1e-7162-9e77-3658c1a640ec';
+globalThis.portfolioId = '';
+globalThis.paperTradeGroupId = '';
+globalThis.accessToken = 'Qtxouimz4emrOtxm9jia4bwidnBvqU8cQHcf7_Gxxok'
 
 // Health check
 app.get('/api/health', async (_req, res) => {
@@ -205,12 +206,57 @@ app.put('/api/devices/:id/chown', async (req, res, next) => {
   }
 });
 
+app.post('/api/getPortfolioId', async (req, res, next) => {
+  try {
+    portfolioList().then((data) => {
+      res.json(data);
+    });
+
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/setPortfolioId', async (req, res, next) => {
+  try {
+    const { portfolioId } = req.body;
+    if (typeof portfolioId !== 'string' || !portfolioId.trim()) {
+      return res.status(400).json({ error: 'portfolioId is required' });
+    }
+    globalThis.portfolioId = portfolioId.trim();
+    res.json({ status: 'Success', portfolioId: globalThis.portfolioId });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // -------- Allocation actions --------
 // list portfolio
 app.get('/api/portfolio', async (_req, res, next) => {
   try {
+    // Ensure a portfolioId is selected. If not, fetch the portfolio list and pick the first one.
+    if (!globalThis.portfolioId) {
+      const portfolios = await portfolioList();
+      if (!Array.isArray(portfolios) || portfolios.length === 0) {
+      return res.status(404).json({ error: 'No portfolios found. Please select a portfolio' });
+      }
+      const first = portfolios[0];
+      const pid = first.portfolio_id || first.id || first.portfolioId || first.uuid || first.key;
+      if (!pid) {
+      return res.status(500).json({ error: 'Unable to determine portfolio id from upstream' });
+      }
+      globalThis.portfolioId = String(pid);
+    }
+  }catch (err) {
+    next(err);
+  }
+
+  // fetch portfolio details after ensuring portfolioId is set
+  try {
     const { portfolioData, instrumentData } = await portfolioDetails();
+    if (!portfolioData || !instrumentData) {
+      return res.status(304).json({ error: 'No portfolio data.. Please select the portfolio' });
+    }
     // console.log('portfolioData:', JSON.stringify(portfolioData)); // <-- debug log
     // console.log('instrumentData:', JSON.stringify(instrumentData)); // <-- debug log
     const transformedRows = transformPortfolioResponse(portfolioData);
@@ -227,16 +273,21 @@ app.get('/api/portfolio', async (_req, res, next) => {
 app.post('/api/devices/:id/addmore', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { symbol, quantity, price, lot_size, type } = req.body;
+    const { symbol, lots, price, lot_size, type } = req.body;
 
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid ID' });
-    if (typeof quantity !== 'string' || !quantity.trim()) {
-      return res.status(400).json({ error: 'quantity is required' });
+    if (typeof lots !== 'string' || !lots.trim()) {
+      return res.status(400).json({ error: 'lots is required' });
     }
-    if (isNaN(Number(quantity.trim()))) {
-      return res.status(400).json({ error: 'quantity must be a valid number string' });
+    if (isNaN(Number(lots.trim()))) {
+      return res.status(400).json({ error: 'lots must be a valid number string' });
     }
-    const ret = createOrderPayload(type, symbol, quantity, price, lot_size);
+    const quant = Number(lots.trim()) * Number(lot_size);
+    const ret = await createOrderPayload(type, symbol, quant, price);
+
+    if (!ret.status || ret.status === false) {
+        return res.status(ret.code).json({ error: 'Failed to create order payload: '+JSON.stringify(ret), details: ret.error || ret.details });
+    }
 
     const row = await get(`SELECT * FROM devices WHERE id = ?`, [id]);
     res.json(row);
@@ -245,23 +296,21 @@ app.post('/api/devices/:id/addmore', async (req, res, next) => {
   }
 });
 
-// Release device (clear allocation)
-app.post('/api/devices/:id/release', async (req, res, next) => {
+// Exit position (clear allocation)
+app.post('/api/devices/:id/exit', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    const { symbol, quantity, price, lot_size, type } = req.body;
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid ID' });
 
-    // Only release if currently allocated
-    const { changes } = await run(
-      `UPDATE devices
-       SET allocated_to = NULL, allocated_at = NULL, allocated_until = NULL
-       WHERE id = ? AND allocated_to IS NOT NULL`,
-      [id]
-    );
-    if (changes === 0) {
-      const exists = await get(`SELECT id FROM devices WHERE id = ?`, [id]);
-      if (!exists) return res.status(404).json({ error: 'Not found' });
-      return res.status(409).json({ error: 'Device is already available' });
+    const quant = Math.abs(Number(quantity))
+    console.log('Request body:', JSON.stringify(req.body));
+    const newtype = type === "SELL" ? "BUY" : "SELL";
+    console.log('Inverted type for release:', newtype);
+    const ret = await createOrderPayload(newtype, symbol, quant, price);
+
+    if (!ret.status || ret.status === false) {
+        return res.status(ret.code).json({ error: 'Failed to create order payload: '+JSON.stringify(ret), details: ret.error || ret.details });
     }
 
     const row = await get(`SELECT * FROM devices WHERE id = ?`, [id]);
@@ -305,9 +354,8 @@ function validateDeviceFields(symbol, token, strike, quantity) {
 }
 
 // Function calls
-async function createOrderPayload(action, symbol, lots, price, lot_size) {
+async function createOrderPayload(action, symbol, quantity, price) {
   // Implementation here
-  const quantity = Number(lots.trim()) * Number(lot_size);
   const callbackUrl = 'https://oxide.sensibull.com/v1/compute/vt2/order'; // <-- paper trading endpoint
   const payload = {
     orders: [
@@ -332,6 +380,43 @@ async function createOrderPayload(action, symbol, lots, price, lot_size) {
         body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////
+      const cloned = resp.clone();
+      const respText = await cloned.text().catch(() => '<unreadable>');
+      /*console.log('Upstream response:', {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
+        body: respText
+      });*/
+      ////////////////////////////////////////////////////////////
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '<unreadable>');
+        return { status: false, error: respText, code: resp.status };
+      }
+      const respJson = await resp.json().catch(() => null);
+      //console.log(JSON.stringify({ status: true, response: respJson }));
+      return { status: true, response: respJson };
+    } catch (e) {
+      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+    }
+}
+
+async function portfolioList() {
+  // Implementation here
+  const Url = 'https://oxide.sensibull.com/v1/compute/vt2/portfolio_list/'; // <-- paper trading endpoint
+  const payload = {
+    "is_initial_load":false,
+    "page_index":0,
+    "page_size":20,
+    "sort_field":"updatedat"
+  };
+    try {
+      const resp = await fetch(Url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        body: JSON.stringify(payload),
+      });
+      ////////////////////// Debugging info //////////////////////
       /*const cloned = resp.clone();
       const respText = await cloned.text().catch(() => '<unreadable>');
       console.log('Upstream response:', {
@@ -346,8 +431,7 @@ async function createOrderPayload(action, symbol, lots, price, lot_size) {
         return console.log(JSON.stringify({ error: resp.statusText, details: text }));
       }
       const respJson = await resp.json().catch(() => null);
-      //console.log(JSON.stringify({ status: 'success', response: respJson }));
-      return { status: 'success', response: respJson };
+      return respJson.payload.portfolios || [];
     } catch (e) {
       return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
     }
@@ -392,6 +476,8 @@ async function portfolioDetails() {
       }
       const portfolioData = respJson.payload.groups[0].positions_per_underlying || {};
       const instrumentData = respJson.payload.instrument_info || {};
+      globalThis.paperTradeGroupId = respJson.payload.groups[0].id || '';
+
       return { portfolioData, instrumentData };
     } catch (e) {
       return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));

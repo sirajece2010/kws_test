@@ -9,6 +9,8 @@ const newStrike = document.getElementById('new-strike');
 const newQuantity = document.getElementById('new-quantity');
 const createBtn = document.getElementById('create-btn');
 const authBtn = document.getElementById('auth-btn');
+const getPortfolioBtn = document.getElementById('get-portfolio-btn');
+const portfolioSelect = document.getElementById('portfolio-select');
 const statusEl = document.getElementById('status');
 
 let devices = [];
@@ -42,6 +44,48 @@ authBtn.addEventListener('click', async () => {
     setStatus(parseError(e), true);
   }
 });
+
+getPortfolioBtn.addEventListener('click', async () => {
+  try {
+    const res = await postJSON(`${API}/getPortfolioId`, { });
+
+    // populate portfolioSelect with names from response
+    const list = Array.isArray(res)
+      ? res
+      : Array.isArray(res.portfolios)
+      ? res.portfolios
+      : Array.isArray(res.data)
+        ? res.data
+        : [];
+
+    portfolioSelect.innerHTML = '';
+    list.forEach(val => {
+      const opt = document.createElement('option');
+      opt.value = val.id ?? JSON.stringify(val);
+      opt.textContent = val.name ?? JSON.stringify(val);
+      portfolioSelect.appendChild(opt);
+    });
+
+    //setStatus(`Portfolio Data: ${JSON.stringify(res)}`, false);
+  } catch (e) {
+    setStatus(parseError(e), true);
+  }
+});
+
+portfolioSelect.addEventListener('change', async ()  => {
+  try {
+    const portfolioId = portfolioSelect.value;
+    const portfolioName = portfolioSelect.options[portfolioSelect.selectedIndex].textContent;
+    if (!portfolioId || !portfolioId.trim()) return;
+    await postJSON(`${API}/setPortfolioId`, { portfolioId: portfolioId.trim() });
+    await refresh();
+    setStatus(`Portfolio set to: ${portfolioName.trim()}`, false);
+  } catch (e) {
+    setStatus(parseError(e), true);
+  }
+});
+
+// --- main functions ---
 
 async function refresh() {
   try {
@@ -83,7 +127,7 @@ function render() {
     tr.appendChild(td(d.strike|| '—'));
     tr.appendChild(td(d.quantity|| '—'));
     tr.appendChild(td(d.avg_price|| '0'));
-    tr.appendChild(td(d.ltp|| '—'));
+    tr.appendChild(td(Number(d.ltp).toFixed(2)|| '—'));
     tr.appendChild(td(d.booked|| '0'));
     tr.appendChild(td(d.unbooked|| '0'));
     tr.appendChild(td(d.stop_loss|| '—'));
@@ -99,7 +143,7 @@ function render() {
       const losts = prompt('How many lots to add?');
       if (!losts || !losts.trim()) return;
       try {
-        await postJSON(`${API}/devices/${d.id}/addmore`, { symbol: d.symbol, quantity: losts.trim(), price: d.ltp, lot_size: d.lot_size, type: ordertype });
+        await postJSON(`${API}/devices/${d.id}/addmore`, { symbol: d.symbol, lots: losts.trim(), price: d.ltp, lot_size: d.lot_size, type: ordertype });
         await refresh();
         setStatus(`Added ${losts.trim()} lots of ${d.symbol}`, false);
       } catch (e) {
@@ -113,7 +157,7 @@ function render() {
     exitBtn.onclick = async () => {
       if (!confirm(`Exit ${d.symbol}?`)) return;
       try {
-        await postJSON(`${API}/devices/${d.id}/release`, {});
+        await postJSON(`${API}/devices/${d.id}/exit`, { symbol: d.symbol, quantity: d.quantity, price: d.ltp, lot_size: d.lot_size, type: ordertype });
         await refresh();
         setStatus(`Exited ${d.symbol}`, false);
       } catch (e) {

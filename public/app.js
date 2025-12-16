@@ -109,7 +109,7 @@ function render() {
     const tr = document.createElement('tr');
     tr.style.backgroundColor = d.unbooked > 0 ? '#e8f5e9' : d.unbooked < 0 ? '#ffebee' : '#ffffff';
 
-    const ordertype = d.type ? d.quantity > 0 ? 'BUY' : 'SELL' : '—';
+    const ordertype = d.quantity === 0 ? '—' : (d.quantity > 0 ? 'BUY' : 'SELL');
     tr.appendChild(td(d.id));
     tr.appendChild(td(d.symbol));
     tr.appendChild(td(d.token));

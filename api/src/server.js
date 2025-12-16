@@ -24,7 +24,7 @@ await init();
 // Global vairables
 globalThis.portfolioId = '';
 globalThis.paperTradeGroupId = '';
-globalThis.accessToken = 'Qtxouimz4emrOtxm9jia4bwidnBvqU8cQHcf7_Gxxok'
+globalThis.accessToken = 'ieKn-PJH85-6gMA_-cZjnRrckI2WZEfEyPDj5h4DEHc'
 
 // Health check
 app.get('/api/health', async (_req, res) => {
@@ -305,9 +305,9 @@ app.post('/api/devices/:id/exit', async (req, res, next) => {
 
     const quant = Math.abs(Number(quantity))
     console.log('Request body:', JSON.stringify(req.body));
-    const newtype = type === "SELL" ? "BUY" : "SELL";
-    console.log('Inverted type for release:', newtype);
-    const ret = await createOrderPayload(newtype, symbol, quant, price);
+    const exitType = Number(quantity) < 0 ? "BUY" : "SELL";
+    console.log('Inverted type for release:', exitType);
+    const ret = await createOrderPayload(exitType, symbol, quant, price);
 
     if (!ret.status || ret.status === false) {
         return res.status(ret.code).json({ error: 'Failed to create order payload: '+JSON.stringify(ret), details: ret.error || ret.details });
@@ -333,25 +333,45 @@ app.delete('/api/devices/:id', async (req, res, next) => {
   }
 });
 
-// Sample function to validate device fields
-function validateDeviceFields(symbol, token, strike, quantity) {
-  if (typeof symbol !== 'string' || !symbol.trim()) {
-    return { valid: false, error: 'symbol is required' };
+// Auto-exit monitor for stop-loss
+setInterval(async () => {
+  try {
+    if (!globalThis.portfolioId) return;
+    //console.log('Auto-exit monitor checking portfolio:', globalThis.portfolioId);
+
+    const { portfolioData, instrumentData } = await portfolioDetails();
+    if (!portfolioData || !instrumentData) return;
+
+    const transformedRows = transformPortfolioResponse(portfolioData);
+    const instrumentInfo = transformInstrumentInfo(instrumentData);
+    const combined = enrichPortfolioWithInstruments(transformedRows, instrumentInfo);
+
+    for (const position of combined) {
+      if (position.quantity === 0) continue;
+
+      const shouldExit = position.quantity < 0 
+        ? position.ltp >= position.stop_loss 
+        : position.ltp <= position.stop_loss;
+
+      if (shouldExit) {
+        console.log(`Auto-exit triggered for ${position.symbol}: LTP=${position.ltp}, SL=${position.stop_loss}`);
+
+        const exitType = position.quantity < 0 ? "BUY" : "SELL";
+        const exitQuantity = Math.abs(position.quantity);
+
+        const ret = await createOrderPayload(exitType, position.symbol, exitQuantity, position.ltp);
+
+        if (ret.status) {
+          console.log(`Successfully auto-exited ${position.symbol}`);
+        } else {
+          console.error(`Failed to auto-exit ${position.symbol}:`, ret.error);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Auto-exit monitor error:', err);
   }
-  if (typeof token !== 'string' || !token.trim()) {
-    return { valid: false, error: 'token is required' };
-  }
-  if (typeof strike !== 'string' || !strike.trim()) {
-    return { valid: false, error: 'strike is required' };
-  }
-  if (typeof quantity !== 'string' || !quantity.trim()) {
-    return { valid: false, error: 'quantity is required' };
-  }
-  if (isNaN(Number(quantity.trim()))) {
-    return { valid: false, error: 'quantity must be a valid number' };
-  }
-  return { valid: true };
-}
+}, 5000); // Check every 5 seconds
 
 // Function calls
 async function createOrderPayload(action, symbol, quantity, price) {
@@ -460,7 +480,6 @@ async function portfolioDetails() {
       const respText = await cloned.text().catch(() => '<unreadable>');
       const respJson = JSON.parse(respText);
       const groups = respJson.payload.groups[0] || {};
-      //const symbolInfo = Object.values(groups.positions_per_underlying[0].positions || {}).find(pos => pos.tradingsymbol === symbol);
       /*console.log('Upstream response:', {
         status: resp.status,
         statusText: resp.statusText,
@@ -476,6 +495,7 @@ async function portfolioDetails() {
       }
       const portfolioData = respJson.payload.groups[0].positions_per_underlying || {};
       const instrumentData = respJson.payload.instrument_info || {};
+      //const orderBookGroups = respJson.payload.groups[0].orders || {};
       globalThis.paperTradeGroupId = respJson.payload.groups[0].id || '';
 
       return { portfolioData, instrumentData };
@@ -540,6 +560,43 @@ function enrichPortfolioWithInstruments(portfolio, instrumentInfo) {
       is_expired: instInfo.is_expired || false
     };
   });
+}
+
+async function presentStrategy(stratergy_name="SHORT_STRADDLE", expiry_date="2025-12-16", underlying_token=256265) {
+  // Implementation here
+  const Url = 'https://oxide.sensibull.com/v1/compute/1/presets';
+  const payload =  {
+      expiry: expiry_date,
+      strategy_type: stratergy_name,
+      underlying_token: underlying_token
+    };
+
+    try {
+      const resp = await fetch(Url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        body: JSON.stringify(payload),
+      });
+      ////////////////////// Debugging info //////////////////////
+      const cloned = resp.clone();
+      const respText = await cloned.text().catch(() => '<unreadable>');
+      console.log('Upstream response:', {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
+        body: respText
+      });
+      ////////////////////////////////////////////////////////////
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '<unreadable>');
+        return { status: false, error: respText, code: resp.status };
+      }
+      const respJson = await resp.json().catch(() => null);
+      //console.log(JSON.stringify({ status: true, response: respJson }));
+      return { status: true, response: respJson };
+    } catch (e) {
+      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+    }
 }
 
 // Global error handler

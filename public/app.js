@@ -12,6 +12,7 @@ const authBtn = document.getElementById('auth-btn');
 const getPortfolioBtn = document.getElementById('get-portfolio-btn');
 const portfolioSelect = document.getElementById('portfolio-select');
 const statusEl = document.getElementById('status');
+const toggleBtn = document.getElementById('theme-toggle');
 
 let devices = [];
 
@@ -109,7 +110,11 @@ function render() {
   tbody.innerHTML = '';
   rows.forEach(d => {
     const tr = document.createElement('tr');
-    tr.style.backgroundColor = d.unbooked > 0 ? '#e8f5e9' : d.unbooked < 0 ? '#ffebee' : '#ffffff';
+    //const isDark = document.documentElement.classList.contains('theme-dark');
+    const isDark = document.documentElement.classList.contains('theme-dark') ? true : false;
+    console.log('isDark:', isDark);
+    //tr.style.backgroundColor = d.unbooked > 0 ? '#58fa65ff' : d.unbooked < 0 ? '#f72f4dff' : '#ffffff';
+    tr.style.backgroundColor = d.unbooked > 0 ? (isDark ? '#145214' : '#e8f5e9') : d.unbooked < 0 ? (isDark ? '#5c121f' : '#ffebee') : (isDark ? '#333333' : '#ffffff');
 
     const ordertype = d.quantity === 0 ? '—' : (d.quantity > 0 ? 'BUY' : 'SELL');
     tr.appendChild(td(d.id));

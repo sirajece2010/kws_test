@@ -92,6 +92,8 @@ async function refresh() {
     //devices = await getJSON(`${API}/devices`);
     console.log('Fetching portfolio data...');
     devices = await getJSON(`${API}/portfolio`);;
+    //result = await postJSON(`${API}/devices/sync`, { devices });
+    //setStatus(`Sync result: ${JSON.stringify(result)}`, false);
     render();
   } catch (e) {
     setStatus(parseError(e), true);
@@ -117,7 +119,7 @@ function render() {
 
     const statusTd = document.createElement('td');
     const allocated = !!(d.quantity && d.quantity !== 0);
-    const hasstrike = !!d.strike;
+    const hasstoploss = !!d.stop_loss;
     const badge = document.createElement('span');
     badge.className = `badge ${allocated ? 'allocated' : 'available'}`;
     badge.textContent = allocated ? 'Open' : 'Closed';
@@ -131,7 +133,7 @@ function render() {
     tr.appendChild(td(d.booked|| '0'));
     tr.appendChild(td(d.unbooked|| '0'));
     tr.appendChild(td(d.stop_loss|| '—'));
-    tr.appendChild(td(d.allocated_at ? new Date(d.allocated_at + 'Z').toLocaleString() : '—'));
+    tr.appendChild(td(d.total ? d.total : (d.booked + d.unbooked)|| '0'));
     tr.appendChild(td(d.expiry|| '—'));
 
     const actionsTd = document.createElement('td');
@@ -165,15 +167,16 @@ function render() {
       }
     };
     const chownBtn = document.createElement('button');
-    chownBtn.textContent = 'Set Owner';
-    chownBtn.disabled = hasstrike;
+    chownBtn.textContent = 'Modify SL';
+    //chownBtn.disabled = !hasstoploss;
+    chownBtn.disabled = true;
     chownBtn.onclick = async () => {
-        const username = prompt('Set Owner to someone (e.g., siraj.kamsa)');
-      if (!username || !username.trim()) return;
+        const stoploss = prompt('Enter the new Stop Loss value:');
+      if (!stoploss || !stoploss.trim()) return;
       try {
-        await putJSON(`${API}/devices/${d.id}/chown`, { strike: username.trim() });
+        await putJSON(`${API}/devices/${d.id}/chsl`, { stop_loss: stoploss.trim(), symbol: d.symbol });
         await refresh();
-        setStatus(`Strike Updated to ${username.trim()}`, false);
+        setStatus(`StopLoss Updated to ${stoploss.trim()}`, false);
       } catch (e) {
         setStatus(parseError(e), true);
       }

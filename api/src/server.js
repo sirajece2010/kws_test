@@ -24,7 +24,7 @@ await init();
 // Global vairables
 globalThis.portfolioId = '';
 globalThis.paperTradeGroupId = '';
-globalThis.accessToken = 'ieKn-PJH85-6gMA_-cZjnRrckI2WZEfEyPDj5h4DEHc'
+globalThis.accessToken = 'oA2XxqMcNsKBT54vdg-XG3NMoj4GFeA3405brcKOuV0'; // <-- replace with your actual access token
 
 // Health check
 app.get('/api/health', async (_req, res) => {
@@ -93,6 +93,80 @@ app.get('/api/devices', async (_req, res, next) => {
   }
 });
 
+// Sync devices from request body
+app.post('/api/devices/sync', async (req, res, next) => {
+  try {
+    const { devices } = req.body;
+    console.log('Received devices body type:', typeof devices, 'isArray:', Array.isArray(devices));
+    if (!Array.isArray(devices)) {
+      return res.status(400).json({ error: 'devices must be an array' });
+    }
+
+    const results = [];
+    for (const device of devices) {
+      const { underlying, symbol, token, strike, quantity, stop_loss } = device;
+
+      if (typeof underlying !== 'string' || !underlying.trim()) {
+        results.push({ error: 'underlying is required', device });
+        continue;
+      }
+      if (typeof symbol !== 'string' || !symbol.trim()) {
+        results.push({ error: 'symbol is required', device });
+        continue;
+      }
+      if (!(typeof token !== 'string' || typeof token !== 'integer')) {
+        results.push({ error: 'token is required', device });
+        continue;
+      }
+      if (!(typeof strike !== 'string' || typeof strike !== 'integer')) {
+        results.push({ error: 'strike is required', device });
+        continue;
+      }
+      if (!(typeof quantity !== 'string' || typeof quantity !== 'integer')) {
+        results.push({ error: 'quantity is required', device });
+        continue;
+      }
+      if (!(typeof stop_loss !== 'string' || typeof stop_loss !== 'integer')) {
+        results.push({ error: 'stop_loss is required', device });
+        continue;
+      }
+
+      try {
+        // Check if token exists
+        const existing = await get(`SELECT id FROM devices WHERE token = ?`, [token]);
+
+        let lastID;
+        if (existing) {
+          // Update existing record
+          await run(
+            `UPDATE devices SET underlying = ?, symbol = ?, strike = ?, quantity = ?, stop_loss = ? WHERE token = ?`,
+            [underlying.trim(), symbol.trim(), strike, quantity, stop_loss, token]
+          );
+          lastID = existing.id;
+        } else {
+          // Insert new record
+          const result = await run(
+            `INSERT INTO devices (underlying, symbol, token, strike, quantity, stop_loss) VALUES (?, ?, ?, ?, ?, ?)`,
+            [underlying.trim(), symbol.trim(), token, strike, quantity, stop_loss]
+          );
+          lastID = result.lastID;
+        }
+        const row = await get(`SELECT * FROM devices WHERE id = ?`, [lastID]);
+        results.push({ success: true, data: row });
+      } catch (e) {
+        if (String(e.message).includes('UNIQUE')) {
+          results.push({ error: 'Token must be unique', device });
+        } else {
+          results.push({ error: e.message, device });
+        }
+      }
+    }
+
+    res.status(201).json({ results });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Create device
 app.post('/api/devices', async (req, res, next) => {
@@ -172,35 +246,61 @@ app.put('/api/devices/:id', async (req, res, next) => {
 });
 
 // Update strike
-app.put('/api/devices/:id/chown', async (req, res, next) => {
+app.put('/api/devices/:id/chsl', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { strike } = req.body;
+    const { stop_loss, symbol } = req.body;
 
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid ID' });
-    const fields = [];
-    const values = [];
 
-    if (strike !== undefined) {
-      if (typeof strike !== 'string' || !strike.trim()) {
-        return res.status(400).json({ error: 'strike must be a non-empty string' });
-      }
-      fields.push('strike = ?'); values.push(strike.trim());
+    if (stop_loss === undefined) {
+      return res.status(400).json({ error: 'stop_loss is required' });
     }
-    if (fields.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
 
-    values.push(id);
-    try {
-      const { changes } = await run(`UPDATE devices SET ${fields.join(', ')} WHERE id = ?`, values);
-      if (changes === 0) return res.status(404).json({ error: 'Not found' });
-      const row = await get(`SELECT * FROM devices WHERE id = ?`, [id]);
-      res.json(row);
-    } catch (e) {
-      if (String(e.message)) {
-        return res.status(409).json({ error: 'Unable to update the strike' });
-      }
-      throw e;
+    if (typeof stop_loss !== 'string' || !stop_loss.trim()) {
+      return res.status(400).json({ error: 'stop_loss must be a non-empty string' });
     }
+
+    if (isNaN(Number(stop_loss.trim()))) {
+      return res.status(400).json({ error: 'stop_loss must be a valid number string' });
+    }
+
+    // Fetch current portfolio to find the position
+    const { portfolioData, instrumentData } = await portfolioDetails();
+    if (!portfolioData || !instrumentData) {
+      return res.status(404).json({ error: 'Portfolio not found' });
+    }
+
+    const transformedRows = transformPortfolioResponse(portfolioData);
+    const instrumentInfo = transformInstrumentInfo(instrumentData);
+    const combined = enrichPortfolioWithInstruments(transformedRows, instrumentInfo);
+
+    //console.log('combined:', combined);  // <-- debug log
+
+    // Find the position matching the symbol
+    const position = combined.find(p => p.symbol === symbol);
+    if (!position) {
+      return res.status(404).json({ error: 'Position not found in portfolio' });
+    }
+
+    // Update stop_loss in memory (portfolio position)
+    position.stop_loss = Number(stop_loss.trim());
+
+    //console.log('combined:', combined);  // <-- debug log
+
+    // Update stop_loss in the database
+    /*const { changes } = await run(
+      `UPDATE devices SET stop_loss = ? WHERE id = ?`,
+      [stop_loss.trim(), id]
+    );
+
+    if (changes === 0) {
+      return res.status(404).json({ error: 'Device not found' });
+    }*/
+
+    const row = await get(`SELECT * FROM devices WHERE id = ?`, [id]);
+    res.json(row);
+
   } catch (err) {
     next(err);
   }
@@ -524,7 +624,8 @@ function transformPortfolioResponse(apiResponse) {
     ltp: pos.ltp,
     booked: Math.round(pos.realised_pnl),
     unbooked: Math.round(pos.unrealised_pnl),
-    stop_loss: pos.open_qty < 0 ? Math.round(pos.avg_price * 1.5 * 20) / 20 : Math.round(pos.avg_price * 0.5 * 20) / 20
+    total: Math.round(pos.total_pnl),
+    stop_loss: pos.open_qty < 0 ? Math.round(pos.avg_price * 1.5 * 20) / 20 : Math.round(pos.avg_price * 0.33 * 20) / 20
   }));
 }
 

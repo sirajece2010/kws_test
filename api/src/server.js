@@ -24,7 +24,7 @@ await init();
 // Global vairables
 globalThis.portfolioId = '';
 globalThis.paperTradeGroupId = '';
-globalThis.accessToken = 'oA2XxqMcNsKBT54vdg-XG3NMoj4GFeA3405brcKOuV0'; // <-- replace with your actual access token
+globalThis.accessToken = 'X5cwrmsjzE4uRjKx3-Z2Exk7HtnyB9CK2cJ9sKok7ic'; // <-- replace with your actual access token
 
 // Health check
 app.get('/api/health', async (_req, res) => {
@@ -449,12 +449,24 @@ setInterval(async () => {
     for (const position of combined) {
       if (position.quantity === 0) continue;
 
-      const shouldExit = position.quantity < 0 
-        ? position.ltp >= position.stop_loss 
-        : position.ltp <= position.stop_loss;
+      // Check if current time in IST is greater than 10:20 AM
+      const istTime = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+      }).format(new Date());
+      const [h, m] = istTime.split(':').map(Number);
+      const afterCutoff = (h * 60 + m) > (10 * 60 + 20) && (h * 60 + m) < (15 * 60 + 10); // after 10:20 AM and before 3:10 PM
+
+      const shouldExit = afterCutoff && (
+        position.quantity < 0 
+          ? position.ltp >= position.stop_loss 
+          : position.ltp <= position.stop_loss
+      );
 
       if (shouldExit) {
-        console.log(`Auto-exit triggered for ${position.symbol}: LTP=${position.ltp}, SL=${position.stop_loss}`);
+        console.log(`Auto-exit triggered for ${position.symbol}: LTP=${position.ltp}, SL=${position.stop_loss} at time:${istTime}`);
 
         const exitType = position.quantity < 0 ? "BUY" : "SELL";
         const exitQuantity = Math.abs(position.quantity);

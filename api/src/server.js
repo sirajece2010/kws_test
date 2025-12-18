@@ -83,7 +83,7 @@ app.post('/api/authenticate', async (req, res, next) => {
 app.get('/api/devices', async (_req, res, next) => {
   try {
     const rows = await all(`
-      SELECT id, symbol, token, strike, quantity, stop_loss, allocated_to, allocated_at, allocated_until, created_at
+      SELECT id, symbol, token, strike, quantity, stop_loss, allocated_to, allocated_at, expiry, created_at
       FROM devices
       ORDER BY id ASC
     `);

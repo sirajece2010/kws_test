@@ -24,7 +24,7 @@ await init();
 // Global vairables
 globalThis.portfolioId = '';
 globalThis.paperTradeGroupId = '';
-globalThis.accessToken = 'X5cwrmsjzE4uRjKx3-Z2Exk7HtnyB9CK2cJ9sKok7ic'; // <-- replace with your actual access token
+globalThis.accessToken = '4FVdrhB_t8enGj-xP8pWfev2QEgq7Jav_7DMuRdyr1c'; // <-- replace with your actual access token
 
 // Health check
 app.get('/api/health', async (_req, res) => {

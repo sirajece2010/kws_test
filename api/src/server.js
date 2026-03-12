@@ -15,7 +15,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 //app.use(express.static(path.join(__dirname, '../../public')));
 
-const publicDir = path.resolve(__dirname, '../../public');
+//const publicDir = path.resolve(__dirname, '../../public');
+const publicDir = path.resolve(__dirname, '../public');
 console.log('Serving static from:', publicDir); // <-- add this for debug
 app.use(express.static(publicDir))
 
@@ -24,7 +25,7 @@ await init();
 // Global vairables
 globalThis.portfolioId = '';
 globalThis.paperTradeGroupId = '';
-globalThis.accessToken = '4FVdrhB_t8enGj-xP8pWfev2QEgq7Jav_7DMuRdyr1c'; // <-- replace with your actual access token
+globalThis.accessToken = 'ghGS58ZwXu1yYQivccdyWkosjTI4wIZERqO_UUfzLeY'; // <-- replace with your actual access token
 
 // Health check
 app.get('/api/health', async (_req, res) => {

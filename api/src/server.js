@@ -15,10 +15,24 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 //app.use(express.static(path.join(__dirname, '../../public')));
 
-//const publicDir = path.resolve(__dirname, '../../public');
 const publicDir = path.resolve(__dirname, '../public');
-console.log('Serving static from:', publicDir); // <-- add this for debug
-app.use(express.static(publicDir))
+// Dynamic public directory resolution
+let publicDirResolved = publicDir;
+const fs = await import('fs');
+const possiblePaths = [
+  publicDir,
+  path.resolve(__dirname, '../../public'),
+  path.join(process.cwd(), 'public')
+];
+
+for (const dirPath of possiblePaths) {
+  if (fs.existsSync(dirPath)) {
+    publicDirResolved = dirPath;
+    break;
+  }
+}
+console.log('Serving static from:', publicDirResolved); // <-- add this for debug
+app.use(express.static(publicDirResolved));
 
 await init();
 

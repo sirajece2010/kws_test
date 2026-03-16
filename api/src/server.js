@@ -85,6 +85,12 @@ app.post('/api/authenticate', async (req, res, next) => {
     if (!resp) {
       return res.status(500).json({ error: 'Failed to contact Sensibull API' });
     }
+    else if (!resp.ok) {
+      const text = await resp.text().catch(() => '<unreadable>');
+      return res.status(resp.status).json({ error: 'Sensibull API error', details: text });
+    } else { 
+      globalThis.accessToken = secretkey.trim();
+    }
 
     res.json({ code });
   } catch (err) {

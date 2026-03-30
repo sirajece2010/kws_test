@@ -21,11 +21,20 @@
     .error { color: #c62828; margin-top: 8px; }
     .success { color: #2e7d32; margin-top: 8px; }
     .muted { color: #555; font-size: 12px; }
+    .user-label { position: fixed; top: 16px; right: 16px; font-size: 14px; font-weight: 600; background: #c68e8e; color: #fff; padding: 6px 14px; border-radius: 20px; z-index: 1000; }
   </style>
 </head>
 <body>
+  <div class="user-label">&#128100; <span id="username-label">Guest</span></div>
   <h1>Open Options</h1>
-
+  <div class="controls" style="position: fixed; bottom: 20px; left: 20px; width: auto;">
+    <select id="user-select">
+      <option value="">Select User</option>
+      <option value="UVP969">Anees Fathima</option>
+      <option value="NYS963">Siraj Deen</option>
+    </select>
+    <button id="switch-user-btn">Switch User</button>
+  </div>
   <div class="controls">
     <input id="search" type="text" placeholder="Search by name or serial" />
     <form id="create-form" onsubmit="return false;">

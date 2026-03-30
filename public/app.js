@@ -14,6 +14,42 @@ const portfolioSelect = document.getElementById('portfolio-select');
 const statusEl = document.getElementById('status');
 const toggleBtn = document.getElementById('theme-toggle');
 
+const userSelect = document.getElementById('user-select');
+const switchUserBtn = document.getElementById('switch-user-btn');
+let currentUser = localStorage.getItem('currentUser') || null;
+let accessTokens = JSON.parse(localStorage.getItem('accessTokens')) || {};
+
+// Initialise username label from persisted session
+(function () {
+  const label = document.getElementById('username-label');
+  if (label && currentUser) label.textContent = currentUser;
+})();
+
+function setCurrentUser(username) {
+  currentUser = username;
+  localStorage.setItem('currentUser', username);
+  userSelect.value = username;
+  const label = document.getElementById('username-label');
+  if (label) label.textContent = username || 'Guest';
+}
+
+function saveAccessToken(username, token) {
+  accessTokens[username] = token;
+  localStorage.setItem('accessTokens', JSON.stringify(accessTokens));
+}
+
+function getAccessToken(username) {
+  return accessTokens[username] || null;
+}
+
+switchUserBtn.addEventListener('click', async () => {
+  const username = userSelect.value.trim();
+  if (!username) return setStatus('Please select a user', true);
+  setCurrentUser(username);
+  await refresh();
+  setStatus(`Switched to user: ${username}`, false);
+});
+
 let devices = [];
 
 searchInput.addEventListener('input', () => render());
@@ -205,14 +241,19 @@ function td(text) {
 
 // --- helpers ---
 async function getJSON(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${getAccessToken(currentUser)}` }
+  });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 async function postJSON(url, body) {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${getAccessToken(currentUser)}`
+    },
     body: JSON.stringify(body || {})
   });
   if (!res.ok) throw new Error(await res.text());
@@ -221,7 +262,10 @@ async function postJSON(url, body) {
 async function putJSON(url, body) {
   const res = await fetch(url, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${getAccessToken(currentUser)}`
+    },
     body: JSON.stringify(body || {})
   });
   if (!res.ok) throw new Error(await res.text());

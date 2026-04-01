@@ -96,14 +96,22 @@ getPortfolioBtn.addEventListener('click', async () => {
         : [];
 
     portfolioSelect.innerHTML = '';
+    if (list.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No portfolios found';
+      portfolioSelect.appendChild(opt);
+      setStatus('No portfolios found or invalid access token or create a new portfolio.', true);
+      return;
+    }
     list.forEach(val => {
       const opt = document.createElement('option');
       opt.value = val.id ?? JSON.stringify(val);
       opt.textContent = val.name ?? JSON.stringify(val);
       portfolioSelect.appendChild(opt);
     });
-
-    //setStatus(`Portfolio Data: ${JSON.stringify(res)}`, false);
+    setStatus(`${list.length} Portfolios loaded`, false);
+    //setStatus(`Portfolio Data: ${JSON.stringify(res)}`, false, true);
   } catch (e) {
     setStatus(parseError(e), true);
   }
@@ -271,9 +279,16 @@ async function putJSON(url, body) {
   if (!res.ok) throw new Error(await res.text());
   return res.json().catch(() => ({})); // handles empty response
 }
-function setStatus(msg, isError) {
+function setStatus(msg, isError, persist = false) {
   statusEl.textContent = msg || '';
   statusEl.className = isError ? 'error' : 'success';
+  if (!persist) {
+    // clear status after 3 seconds
+    setTimeout(() => {
+      statusEl.textContent = '';
+      statusEl.className = '';
+    }, 3000);
+  }
 }
 
 function parseError(e) {

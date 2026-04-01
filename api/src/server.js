@@ -51,6 +51,24 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
+app.get('/api/validate', async (req, res, next) => {
+  try {
+    const token = req.headers['temp_token'] || '';
+    globalThis.accessToken = token;
+    console.log('Validating access token:', token); // <-- debug log
+
+    // Optionally, you can add logic here to validate the access token with the upstream service
+    const isValid = await IsvalidToken(); // <-- test call to upstream to validate token
+    console.log('Access token validation result:', isValid); // <-- debug log
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid access token. Please provide a valid access token.' });
+    }
+    res.json({ status: 'success', message: 'Access token is set. You are authenticated.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post('/api/authenticate', async (req, res, next) => {
   try {
     const { secretkey } = req.body;
@@ -58,7 +76,7 @@ app.post('/api/authenticate', async (req, res, next) => {
       return res.status(400).json({ error: 'secretkey is required' });
     }
     const code = OTPLib.authenticator.generate(secretkey.trim());
-    console.log('Generated OTP code:', code); // <-- debug log
+    //console.log('Generated OTP code:', code); // <-- debug log
 
     // Example usage with Sensibull API key (replace with actual logic as needed)
     const url = 'https://kite.zerodha.com/connect/login';
@@ -73,13 +91,13 @@ app.post('/api/authenticate', async (req, res, next) => {
       method: 'GET',
     });
     ////////////////////// Debugging info //////////////////////
-    console.log('Sensibull API response:', {
+    /*console.log('Sensibull API response:', {
       status: resp.status,
       statusText: resp.statusText,
       headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
       cookies: resp.headers.get('set-cookie') || 'none',
       //body: await resp.text().catch(() => '<unreadable>')
-    });
+    });*/
     ////////////////////////////////////////////////////////////
 
     if (!resp) {
@@ -89,7 +107,13 @@ app.post('/api/authenticate', async (req, res, next) => {
       const text = await resp.text().catch(() => '<unreadable>');
       return res.status(resp.status).json({ error: 'Sensibull API error', details: text });
     } else { 
-      globalThis.accessToken = secretkey.trim();
+      globalThis.accessToken = secretkey.trim(); // Store the valid access token globally
+    }
+
+    const isValid = await IsvalidToken(); // <-- test call to upstream to validate token
+    //console.log('Access token validation result:', isValid); // <-- debug log
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid access token.' });
     }
 
     res.json({ code });
@@ -359,7 +383,7 @@ app.get('/api/portfolio', async (_req, res, next) => {
     if (!globalThis.portfolioId) {
       const portfolios = await portfolioList();
       if (!Array.isArray(portfolios) || portfolios.length === 0) {
-      return res.status(404).json({ error: 'No portfolios found. Please select a portfolio' });
+      return res.status(404).json({ error: 'No portfolios found. (or) Invalid AccessToken.' });
       }
       const first = portfolios[0];
       const pid = first.portfolio_id || first.id || first.portfolioId || first.uuid || first.key;
@@ -581,7 +605,8 @@ async function portfolioList() {
       ////////////////////////////////////////////////////////////
       if (!resp.ok) {
         const text = await resp.text().catch(() => '<unreadable>');
-        return console.log(JSON.stringify({ error: resp.statusText, details: text }));
+        console.log(JSON.stringify({ error: resp.statusText, details: text }));
+        return [];
       }
       const respJson = await resp.json().catch(() => null);
       return respJson.payload.portfolios || [];
@@ -732,6 +757,27 @@ async function presentStrategy(stratergy_name="SHORT_STRADDLE", expiry_date="202
       return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
     }
 }
+
+async function IsvalidToken() {
+  const Url = 'https://oxide.sensibull.com/v1/compute/1/broker_data/user_ato';
+  try {
+    const resp = await fetch(Url, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '<unreadable>');
+      console.log(JSON.stringify({ error: resp.statusText, details: text }));
+      return false;
+    }
+    const respJson = await resp.json().catch(() => null);
+    return respJson.success; // If we get success response true, token is valid
+  } catch (e) {
+    console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+    return false;
+  }
+}
+
 
 // Global error handler
 app.use((err, _req, res, _next) => {

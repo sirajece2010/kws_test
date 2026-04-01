@@ -38,8 +38,33 @@ await init();
 
 // Global vairables
 globalThis.portfolioId = '';
+globalThis.portfolioToken = ''; // Track which token owns the current portfolio
 globalThis.paperTradeGroupId = '';
-globalThis.accessToken = 'ghGS58ZwXu1yYQivccdyWkosjTI4wIZERqO_UUfzLeY'; // <-- replace with your actual access token
+globalThis.accessToken = '';
+
+function getRequestToken(req) {
+  const authHeader = req.headers['authorization'] || req.headers['Authorization'] || '';
+  const auth = Array.isArray(authHeader) ? authHeader[0] : String(authHeader);
+  const bearerMatch = auth.match(/^Bearer\s+(.+)$/i);
+  if (bearerMatch) {
+    const token = bearerMatch[1].trim();
+    if (token && token !== 'null' && token !== 'undefined') 
+    {
+      globalThis.accessToken = token;
+      
+      // If token changed, clear portfolio state to prevent cross-user pollution
+      if (globalThis.portfolioToken && globalThis.portfolioToken !== token) {
+        globalThis.portfolioId = '';
+        globalThis.paperTradeGroupId = '';
+        console.log('Token changed: clearing portfolio state');
+      }
+      
+      return token;
+    }
+  }
+
+  return globalThis.accessToken || '';
+}
 
 // Health check
 app.get('/api/health', async (_req, res) => {
@@ -53,12 +78,12 @@ app.get('/api/health', async (_req, res) => {
 
 app.get('/api/validate', async (req, res, next) => {
   try {
-    const token = req.headers['temp_token'] || '';
+    const token = getRequestToken(req);
     globalThis.accessToken = token;
     console.log('Validating access token:', token); // <-- debug log
 
     // Optionally, you can add logic here to validate the access token with the upstream service
-    const isValid = await IsvalidToken(); // <-- test call to upstream to validate token
+    const isValid = await IsvalidToken(token); // <-- test call to upstream to validate token
     console.log('Access token validation result:', isValid); // <-- debug log
     if (!isValid) {
       return res.status(401).json({ error: 'Invalid access token. Please provide a valid access token.' });
@@ -110,7 +135,7 @@ app.post('/api/authenticate', async (req, res, next) => {
       globalThis.accessToken = secretkey.trim(); // Store the valid access token globally
     }
 
-    const isValid = await IsvalidToken(); // <-- test call to upstream to validate token
+    const isValid = await IsvalidToken(secretkey.trim()); // <-- test call to upstream to validate token
     //console.log('Access token validation result:', isValid); // <-- debug log
     if (!isValid) {
       return res.status(401).json({ error: 'Invalid access token.' });
@@ -311,7 +336,7 @@ app.put('/api/devices/:id/chsl', async (req, res, next) => {
     }
 
     // Fetch current portfolio to find the position
-    const { portfolioData, instrumentData } = await portfolioDetails();
+    const { portfolioData, instrumentData } = await portfolioDetails(getRequestToken(req));
     if (!portfolioData || !instrumentData) {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
@@ -353,7 +378,7 @@ app.put('/api/devices/:id/chsl', async (req, res, next) => {
 
 app.post('/api/getPortfolioId', async (req, res, next) => {
   try {
-    portfolioList().then((data) => {
+    portfolioList(getRequestToken(req)).then((data) => {
       res.json(data);
     });
 
@@ -368,7 +393,10 @@ app.post('/api/setPortfolioId', async (req, res, next) => {
     if (typeof portfolioId !== 'string' || !portfolioId.trim()) {
       return res.status(400).json({ error: 'portfolioId is required' });
     }
+    const token = getRequestToken(req);
     globalThis.portfolioId = portfolioId.trim();
+    globalThis.portfolioToken = token; // Track which token set this portfolio
+    globalThis.accessToken = token;
     res.json({ status: 'Success', portfolioId: globalThis.portfolioId });
   } catch (err) {
     next(err);
@@ -377,11 +405,11 @@ app.post('/api/setPortfolioId', async (req, res, next) => {
 
 // -------- Allocation actions --------
 // list portfolio
-app.get('/api/portfolio', async (_req, res, next) => {
+app.get('/api/portfolio', async (req, res, next) => {
   try {
     // Ensure a portfolioId is selected. If not, fetch the portfolio list and pick the first one.
     if (!globalThis.portfolioId) {
-      const portfolios = await portfolioList();
+      const portfolios = await portfolioList(getRequestToken(req));
       if (!Array.isArray(portfolios) || portfolios.length === 0) {
       return res.status(404).json({ error: 'No portfolios found. (or) Invalid AccessToken.' });
       }
@@ -398,7 +426,7 @@ app.get('/api/portfolio', async (_req, res, next) => {
 
   // fetch portfolio details after ensuring portfolioId is set
   try {
-    const { portfolioData, instrumentData } = await portfolioDetails();
+    const { portfolioData, instrumentData } = await portfolioDetails(getRequestToken(req));
     if (!portfolioData || !instrumentData) {
       return res.status(304).json({ error: 'No portfolio data.. Please select the portfolio' });
     }
@@ -428,7 +456,7 @@ app.post('/api/devices/:id/addmore', async (req, res, next) => {
       return res.status(400).json({ error: 'lots must be a valid number string' });
     }
     const quant = Number(lots.trim()) * Number(lot_size);
-    const ret = await createOrderPayload(type, symbol, quant, price);
+    const ret = await createOrderPayload(type, symbol, quant, price, getRequestToken(req));
 
     if (!ret.status || ret.status === false) {
         return res.status(ret.code).json({ error: 'Failed to create order payload: '+JSON.stringify(ret), details: ret.error || ret.details });
@@ -452,7 +480,7 @@ app.post('/api/devices/:id/exit', async (req, res, next) => {
     console.log('Request body:', JSON.stringify(req.body));
     const exitType = Number(quantity) < 0 ? "BUY" : "SELL";
     console.log('Inverted type for release:', exitType);
-    const ret = await createOrderPayload(exitType, symbol, quant, price);
+    const ret = await createOrderPayload(exitType, symbol, quant, price, getRequestToken(req));
 
     if (!ret.status || ret.status === false) {
         return res.status(ret.code).json({ error: 'Failed to create order payload: '+JSON.stringify(ret), details: ret.error || ret.details });
@@ -479,12 +507,13 @@ app.delete('/api/devices/:id', async (req, res, next) => {
 });
 
 // Auto-exit monitor for stop-loss
-setInterval(async () => {
+/*setInterval(async () => {
   try {
     if (!globalThis.portfolioId) return;
+    if (!globalThis.accessToken) return;
     //console.log('Auto-exit monitor checking portfolio:', globalThis.portfolioId);
 
-    const { portfolioData, instrumentData } = await portfolioDetails();
+    const { portfolioData, instrumentData } = await portfolioDetails(globalThis.accessToken);
     if (!portfolioData || !instrumentData) return;
 
     const transformedRows = transformPortfolioResponse(portfolioData);
@@ -528,10 +557,10 @@ setInterval(async () => {
   } catch (err) {
     console.error('Auto-exit monitor error:', err);
   }
-}, 5000); // Check every 5 seconds
+}, 5000); // Check every 5 seconds*/
 
 // Function calls
-async function createOrderPayload(action, symbol, quantity, price) {
+async function createOrderPayload(action, symbol, quantity, price, token = globalThis.accessToken) {
   // Implementation here
   const callbackUrl = 'https://oxide.sensibull.com/v1/compute/vt2/order'; // <-- paper trading endpoint
   const payload = {
@@ -553,7 +582,7 @@ async function createOrderPayload(action, symbol, quantity, price) {
     try {
       const resp = await fetch(callbackUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + token },
         body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////
@@ -578,7 +607,7 @@ async function createOrderPayload(action, symbol, quantity, price) {
     }
 }
 
-async function portfolioList() {
+async function portfolioList(token = globalThis.accessToken) {
   // Implementation here
   const Url = 'https://oxide.sensibull.com/v1/compute/vt2/portfolio_list/'; // <-- paper trading endpoint
   const payload = {
@@ -590,7 +619,7 @@ async function portfolioList() {
     try {
       const resp = await fetch(Url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + token },
         body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////
@@ -615,7 +644,7 @@ async function portfolioList() {
     }
 }
 
-async function portfolioDetails() {
+async function portfolioDetails(token = globalThis.accessToken) {
   // Implementation here
   const Url = 'https://oxide.sensibull.com/v1/compute/vt2/portfolio_details/' + portfolioId; // <-- paper trading endpoint
   const payload = {
@@ -630,7 +659,7 @@ async function portfolioDetails() {
     try {
       const resp = await fetch(Url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + token },
         body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////
@@ -721,7 +750,7 @@ function enrichPortfolioWithInstruments(portfolio, instrumentInfo) {
   });
 }
 
-async function presentStrategy(stratergy_name="SHORT_STRADDLE", expiry_date="2025-12-16", underlying_token=256265) {
+async function presentStrategy(stratergy_name="SHORT_STRADDLE", expiry_date="2025-12-16", underlying_token=256265, token = globalThis.accessToken) {
   // Implementation here
   const Url = 'https://oxide.sensibull.com/v1/compute/1/presets';
   const payload =  {
@@ -733,7 +762,7 @@ async function presentStrategy(stratergy_name="SHORT_STRADDLE", expiry_date="202
     try {
       const resp = await fetch(Url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + token },
         body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////
@@ -758,12 +787,12 @@ async function presentStrategy(stratergy_name="SHORT_STRADDLE", expiry_date="202
     }
 }
 
-async function IsvalidToken() {
+async function IsvalidToken(token = globalThis.accessToken) {
   const Url = 'https://oxide.sensibull.com/v1/compute/1/broker_data/user_ato';
   try {
     const resp = await fetch(Url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+      headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + token },
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => '<unreadable>');

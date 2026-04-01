@@ -17,7 +17,6 @@ const toggleBtn = document.getElementById('theme-toggle');
 const userSelect = document.getElementById('user-select');
 const switchUserBtn = document.getElementById('switch-user-btn');
 let currentUser = localStorage.getItem('currentUser') || null;
-let accessTokens = JSON.parse(localStorage.getItem('accessTokens')) || {};
 
 // Initialise username label from persisted session
 (function () {
@@ -34,20 +33,84 @@ function setCurrentUser(username) {
 }
 
 function saveAccessToken(username, token) {
-  accessTokens[username] = token;
-  localStorage.setItem('accessTokens', JSON.stringify(accessTokens));
+  if (!username) return;
+  localStorage.setItem('accessToken_' + username, token);
 }
 
 function getAccessToken(username) {
-  return accessTokens[username] || null;
+  if (!username) return null;
+  const token = localStorage.getItem('accessToken_' + username);
+  if (!token || token === 'null' || token === 'undefined') return null;
+  return token;
+}
+
+function savePortfolioId(username, portfolioId) {
+  if (!username || !portfolioId) return;
+  localStorage.setItem('portfolioId_' + username, portfolioId);
+}
+
+function getPortfolioId(username) {
+  if (!username) return null;
+  return localStorage.getItem('portfolioId_' + username);
+}
+
+function clearUserData(username = null) {
+  if (username) {
+    // Clear specific user's data
+    localStorage.removeItem('accessToken_' + username);
+    localStorage.removeItem('portfolioId_' + username);
+    console.log(`Cleared data for user: ${username}`);
+  } else {
+    // Clear all user-related keys
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key.startsWith('accessToken') || key.startsWith('portfolioId')) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+    localStorage.removeItem('currentUser');
+    console.log(`Cleared all user data. Removed keys: ${keysToRemove.join(', ')}`);
+  }
 }
 
 switchUserBtn.addEventListener('click', async () => {
+  //clearUserData(currentUser);
   const username = userSelect.value.trim();
   if (!username) return setStatus('Please select a user', true);
+  
+  const token = getAccessToken(username);
+  if (!token) {
+    return setStatus(`User ${username} not authenticated. Click "Authenticate" first.`, true);
+  }
+  
+  // Clear and reset portfolio dropdown
+  portfolioSelect.innerHTML = '';
+  const opt = document.createElement('option');
+  opt.value = '';
+  opt.textContent = 'Select Portfolio';
+  portfolioSelect.appendChild(opt);
+  
   setCurrentUser(username);
-  await refresh();
-  setStatus(`Switched to user: ${username}`, false);
+  
+  // Try to restore saved portfolio for this user
+  const savedPortfolioId = getPortfolioId(username);
+  if (savedPortfolioId) {
+    try {
+      await postJSON(`${API}/setPortfolioId`, { portfolioId: savedPortfolioId });
+      portfolioSelect.value = savedPortfolioId;
+    } catch (e) {
+      console.warn('Could not restore portfolio:', e.message);
+    }
+  }
+  
+  try {
+    await refresh();
+    setStatus(`Switched to user: ${username}`, false);
+  } catch (e) {
+    setStatus(parseError(e), true);
+  }
 });
 
 let devices = [];
@@ -73,9 +136,13 @@ createBtn.addEventListener('click', async () => {
 
 authBtn.addEventListener('click', async () => {
   try {
+    if (!currentUser) return setStatus('Select a user before authenticating', true);
     const secretKey = prompt('Enter the secret key to Authenticate:');
+    if (!secretKey || !secretKey.trim()) return setStatus('Secret key is required', true);
 
-    const res = await postJSON(`${API}/authenticate`, { secretkey: secretKey });
+    const token = secretKey.trim();
+    const res = await postJSON(`${API}/authenticate`, { secretkey: token });
+    saveAccessToken(currentUser, token);
     setStatus(`Authentication Code: ${res.code}`, false);
   } catch (e) {
     setStatus(parseError(e), true);
@@ -122,7 +189,10 @@ portfolioSelect.addEventListener('change', async ()  => {
     const portfolioId = portfolioSelect.value;
     const portfolioName = portfolioSelect.options[portfolioSelect.selectedIndex].textContent;
     if (!portfolioId || !portfolioId.trim()) return;
+    
     await postJSON(`${API}/setPortfolioId`, { portfolioId: portfolioId.trim() });
+    savePortfolioId(currentUser, portfolioId.trim());
+    
     await refresh();
     setStatus(`Portfolio set to: ${portfolioName.trim()}`, false);
   } catch (e) {
@@ -247,10 +317,19 @@ function td(text) {
   return td;
 }
 
+function authHeaders(baseHeaders = {}) {
+  const token = getAccessToken(currentUser);
+  if (!token) return { ...baseHeaders };
+  return {
+    ...baseHeaders,
+    Authorization: `Bearer ${token}`
+  };
+}
+
 // --- helpers ---
 async function getJSON(url) {
   const res = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${getAccessToken(currentUser)}` }
+    headers: authHeaders()
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -258,10 +337,9 @@ async function getJSON(url) {
 async function postJSON(url, body) {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${getAccessToken(currentUser)}`
-    },
+    headers: authHeaders({
+      'Content-Type': 'application/json'
+    }),
     body: JSON.stringify(body || {})
   });
   if (!res.ok) throw new Error(await res.text());
@@ -270,10 +348,9 @@ async function postJSON(url, body) {
 async function putJSON(url, body) {
   const res = await fetch(url, {
     method: 'PUT',
-    headers: { 
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${getAccessToken(currentUser)}`
-    },
+    headers: authHeaders({
+      'Content-Type': 'application/json'
+    }),
     body: JSON.stringify(body || {})
   });
   if (!res.ok) throw new Error(await res.text());
@@ -300,4 +377,20 @@ function parseError(e) {
   }
 }
 
-refresh().catch(err => setStatus(parseError(err), true));
+// Auto-restore portfolio on page load
+async function initializeUser() {
+  if (currentUser) {
+    const savedPortfolioId = getPortfolioId(currentUser);
+    if (savedPortfolioId) {
+      try {
+        await postJSON(`${API}/setPortfolioId`, { portfolioId: savedPortfolioId });
+      } catch (e) {
+        console.warn('Could not restore portfolio on load:', e.message);
+      }
+    }
+  }
+}
+
+initializeUser().then(() => {
+  refresh().catch(err => setStatus(parseError(err), true));
+}).catch(err => console.error('Init error:', err));

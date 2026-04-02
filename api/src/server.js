@@ -56,7 +56,7 @@ function getUserPortfolio(userId) {
 function setUserPaperTradeGroup(userId, groupId) {
   if (userId && groupId) {
     userPaperTradeGroups.set(userId, groupId);
-    console.log(`PaperTradeGroup set for user ${userId}: ${groupId}`);
+    console.log(`PaperTradeGroup set for user ${userId}: ${groupId}`); // <-- add this for debug
   }
 }
 
@@ -114,27 +114,6 @@ app.get('/api/health', async (_req, res) => {
     res.json({ status: 'ok', db: 'connected' });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
-  }
-});
-
-app.get('/api/validate', async (req, res, next) => {
-  try {
-    const token = req.headers['temp_token'] || '';
-    const userId = getRequestUserId(req);
-    if (userId) {
-      setUserAccessToken(userId, token);
-    }
-    console.log('Validating access token:', token); // <-- debug log
-
-    // Optionally, you can add logic here to validate the access token with the upstream service
-    const isValid = await IsvalidToken(userId, token); // <-- test call to upstream to validate token
-    console.log('Access token validation result:', isValid); // <-- debug log
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid access token. Please provide a valid access token.' });
-    }
-    res.json({ status: 'success', message: 'Access token is set. You are authenticated.' });
-  } catch (err) {
-    next(err);
   }
 });
 

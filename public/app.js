@@ -46,6 +46,7 @@ switchUserBtn.addEventListener('click', async () => {
   const username = userSelect.value.trim();
   if (!username) return setStatus('Please select a user', true);
   setCurrentUser(username);
+  getPortfolioBtn.click(); // Refresh portfolio for new user
   await refresh();
   setStatus(`Switched to user: ${username}`, false);
 });
@@ -76,7 +77,9 @@ authBtn.addEventListener('click', async () => {
     const secretKey = prompt('Enter the secret key to Authenticate:');
 
     const res = await postJSON(`${API}/authenticate`, { secretkey: secretKey });
-    setStatus(`Authentication Code: ${res.code}`, false);
+    setCurrentUser(res.user);
+    switchUserBtn.click();
+    setStatus(`${res.message}`, false);
   } catch (e) {
     setStatus(parseError(e), true);
   }
@@ -247,10 +250,24 @@ function td(text) {
   return td;
 }
 
+function authHeaders(baseHeaders = {}) {
+  const token = getAccessToken(currentUser);
+  const headers = {
+    ...baseHeaders,
+    'X-User-Id': currentUser || ''
+  };
+  
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
+  return headers;
+}
+
 // --- helpers ---
 async function getJSON(url) {
   const res = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${getAccessToken(currentUser)}` }
+    headers: authHeaders()
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -258,10 +275,9 @@ async function getJSON(url) {
 async function postJSON(url, body) {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${getAccessToken(currentUser)}`
-    },
+    headers: authHeaders({
+      'Content-Type': 'application/json'
+    }),
     body: JSON.stringify(body || {})
   });
   if (!res.ok) throw new Error(await res.text());
@@ -270,10 +286,9 @@ async function postJSON(url, body) {
 async function putJSON(url, body) {
   const res = await fetch(url, {
     method: 'PUT',
-    headers: { 
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${getAccessToken(currentUser)}`
-    },
+    headers: authHeaders({
+      'Content-Type': 'application/json'
+    }),
     body: JSON.stringify(body || {})
   });
   if (!res.ok) throw new Error(await res.text());

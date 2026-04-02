@@ -36,10 +36,76 @@ app.use(express.static(publicDirResolved));
 
 await init();
 
-// Global vairables
-globalThis.portfolioId = '';
-globalThis.paperTradeGroupId = '';
-globalThis.accessToken = 'ghGS58ZwXu1yYQivccdyWkosjTI4wIZERqO_UUfzLeY'; // <-- replace with your actual access token
+// Per-user state storage (Maps indexed by userId/username)
+const userPortfolios = new Map();           // userId -> portfolioId
+const userPaperTradeGroups = new Map();     // userId -> paperTradeGroupId
+const userAccessTokens = new Map();         // userId -> accessToken
+
+// Helper functions for per-user state management
+function setUserPortfolio(userId, portfolioId) {
+  if (userId && portfolioId) {
+    userPortfolios.set(userId, portfolioId);
+    console.log(`Portfolio set for user ${userId}: ${portfolioId}`);
+  }
+}
+
+function getUserPortfolio(userId) {
+  return userId ? userPortfolios.get(userId) : null;
+}
+
+function setUserPaperTradeGroup(userId, groupId) {
+  if (userId && groupId) {
+    userPaperTradeGroups.set(userId, groupId);
+    console.log(`PaperTradeGroup set for user ${userId}: ${groupId}`);
+  }
+}
+
+function getUserPaperTradeGroup(userId) {
+  return userId ? userPaperTradeGroups.get(userId) : null;
+}
+
+function setUserAccessToken(userId, accessToken) {
+  if (userId && accessToken) {
+    userAccessTokens.set(userId, accessToken);
+  }
+}
+
+function getUserAccessToken(userId) {
+  return userId ? userAccessTokens.get(userId) : null;
+}
+
+function clearUserData(userId) {
+  if (userId) {
+    userPortfolios.delete(userId);
+    userPaperTradeGroups.delete(userId);
+    userAccessTokens.delete(userId);
+    console.log(`Cleared all data for user ${userId}`);
+  }
+}
+
+// Extract userId from request header (X-User-Id)
+function getRequestUserId(req) {
+  const userId = req.headers['x-user-id'] || req.get('x-user-id') || '';
+
+  // Filter out invalid values
+  if (!userId || userId === 'null' || userId === 'undefined') {
+    return null;
+  }
+  return userId;
+}
+
+// Extract Authorization Bearer token from request headers
+function getRequestToken(req) {
+  const authHeader = req.get('authorization') || req.headers['authorization'] || req.headers['Authorization'] || '';
+  const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+  const token = bearerMatch ? bearerMatch[1] : null;
+
+  // Filter out invalid tokens
+  if (token === 'null' || token === 'undefined' || !token) {
+    return null;
+  }
+  return token;
+}
 
 // Health check
 app.get('/api/health', async (_req, res) => {
@@ -54,11 +120,14 @@ app.get('/api/health', async (_req, res) => {
 app.get('/api/validate', async (req, res, next) => {
   try {
     const token = req.headers['temp_token'] || '';
-    globalThis.accessToken = token;
+    const userId = getRequestUserId(req);
+    if (userId) {
+      setUserAccessToken(userId, token);
+    }
     console.log('Validating access token:', token); // <-- debug log
 
     // Optionally, you can add logic here to validate the access token with the upstream service
-    const isValid = await IsvalidToken(); // <-- test call to upstream to validate token
+    const isValid = await IsvalidToken(userId, token); // <-- test call to upstream to validate token
     console.log('Access token validation result:', isValid); // <-- debug log
     if (!isValid) {
       return res.status(401).json({ error: 'Invalid access token. Please provide a valid access token.' });
@@ -72,6 +141,11 @@ app.get('/api/validate', async (req, res, next) => {
 app.post('/api/authenticate', async (req, res, next) => {
   try {
     const { secretkey } = req.body;
+    const userId = getRequestUserId(req);
+
+    if (!userId) {
+      return res.status(400).json({ error: 'X-User-Id header is required' });
+    }
     if (typeof secretkey !== 'string' || !secretkey.trim()) {
       return res.status(400).json({ error: 'secretkey is required' });
     }
@@ -106,17 +180,15 @@ app.post('/api/authenticate', async (req, res, next) => {
     else if (!resp.ok) {
       const text = await resp.text().catch(() => '<unreadable>');
       return res.status(resp.status).json({ error: 'Sensibull API error', details: text });
-    } else { 
-      globalThis.accessToken = secretkey.trim(); // Store the valid access token globally
-    }
+    } 
 
-    const isValid = await IsvalidToken(); // <-- test call to upstream to validate token
+    const isValid = await IsvalidToken(userId, secretkey.trim()); // <-- test call to upstream to validate token
     //console.log('Access token validation result:', isValid); // <-- debug log
-    if (!isValid) {
+    if (!isValid.status) {
       return res.status(401).json({ error: 'Invalid access token.' });
     }
-
-    res.json({ code });
+    console.log(`Authentication successful for user ${isValid.user_id}`);
+    res.json({ 'code': code, 'user': isValid.user_id, 'message': `${isValid.user_id} authentication successful. Access token is set.` });
   } catch (err) {
     next(err);
   }
@@ -311,7 +383,7 @@ app.put('/api/devices/:id/chsl', async (req, res, next) => {
     }
 
     // Fetch current portfolio to find the position
-    const { portfolioData, instrumentData } = await portfolioDetails();
+    const { portfolioData, instrumentData } = await portfolioDetails(userId);
     if (!portfolioData || !instrumentData) {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
@@ -353,7 +425,11 @@ app.put('/api/devices/:id/chsl', async (req, res, next) => {
 
 app.post('/api/getPortfolioId', async (req, res, next) => {
   try {
-    portfolioList().then((data) => {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'X-User-Id header is required' });
+    }
+    portfolioList(userId).then((data) => {
       res.json(data);
     });
 
@@ -364,12 +440,18 @@ app.post('/api/getPortfolioId', async (req, res, next) => {
 
 app.post('/api/setPortfolioId', async (req, res, next) => {
   try {
+    const userId = getRequestUserId(req);
     const { portfolioId } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'X-User-Id header is required' });
+    }
     if (typeof portfolioId !== 'string' || !portfolioId.trim()) {
       return res.status(400).json({ error: 'portfolioId is required' });
     }
-    globalThis.portfolioId = portfolioId.trim();
-    res.json({ status: 'Success', portfolioId: globalThis.portfolioId });
+
+    setUserPortfolio(userId, portfolioId.trim());
+    res.json({ status: 'Success', portfolioId: portfolioId.trim() });
   } catch (err) {
     next(err);
   }
@@ -377,20 +459,27 @@ app.post('/api/setPortfolioId', async (req, res, next) => {
 
 // -------- Allocation actions --------
 // list portfolio
-app.get('/api/portfolio', async (_req, res, next) => {
+app.get('/api/portfolio', async (req, res, next) => {
   try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ error: 'X-User-Id header is required' });
+    }
+
     // Ensure a portfolioId is selected. If not, fetch the portfolio list and pick the first one.
-    if (!globalThis.portfolioId) {
-      const portfolios = await portfolioList();
+    let portfolioId = getUserPortfolio(userId);
+    if (!portfolioId) {
+      const portfolios = await portfolioList(userId);
       if (!Array.isArray(portfolios) || portfolios.length === 0) {
-      return res.status(404).json({ error: 'No portfolios found. (or) Invalid AccessToken.' });
+        return res.status(404).json({ error: 'No portfolios found. (or) Invalid AccessToken.' });
       }
       const first = portfolios[0];
       const pid = first.portfolio_id || first.id || first.portfolioId || first.uuid || first.key;
       if (!pid) {
-      return res.status(500).json({ error: 'Unable to determine portfolio id from upstream' });
+        return res.status(500).json({ error: 'Unable to determine portfolio id from upstream' });
       }
-      globalThis.portfolioId = String(pid);
+      portfolioId = String(pid);
+      setUserPortfolio(userId, portfolioId);
     }
   }catch (err) {
     next(err);
@@ -398,7 +487,8 @@ app.get('/api/portfolio', async (_req, res, next) => {
 
   // fetch portfolio details after ensuring portfolioId is set
   try {
-    const { portfolioData, instrumentData } = await portfolioDetails();
+    const userId = getRequestUserId(req);
+    const { portfolioData, instrumentData } = await portfolioDetails(userId);
     if (!portfolioData || !instrumentData) {
       return res.status(304).json({ error: 'No portfolio data.. Please select the portfolio' });
     }
@@ -418,8 +508,12 @@ app.get('/api/portfolio', async (_req, res, next) => {
 app.post('/api/devices/:id/addmore', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    const userId = getRequestUserId(req);
     const { symbol, lots, price, lot_size, type } = req.body;
-
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'X-User-Id header is required' });
+    }
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid ID' });
     if (typeof lots !== 'string' || !lots.trim()) {
       return res.status(400).json({ error: 'lots is required' });
@@ -428,7 +522,7 @@ app.post('/api/devices/:id/addmore', async (req, res, next) => {
       return res.status(400).json({ error: 'lots must be a valid number string' });
     }
     const quant = Number(lots.trim()) * Number(lot_size);
-    const ret = await createOrderPayload(type, symbol, quant, price);
+    const ret = await createOrderPayload(userId, type, symbol, quant, price);
 
     if (!ret.status || ret.status === false) {
         return res.status(ret.code).json({ error: 'Failed to create order payload: '+JSON.stringify(ret), details: ret.error || ret.details });
@@ -445,14 +539,19 @@ app.post('/api/devices/:id/addmore', async (req, res, next) => {
 app.post('/api/devices/:id/exit', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    const userId = getRequestUserId(req);
     const { symbol, quantity, price, lot_size, type } = req.body;
+    
+    if (!userId) {
+      return res.status(401).json({ error: 'X-User-Id header is required' });
+    }
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid ID' });
 
     const quant = Math.abs(Number(quantity))
     console.log('Request body:', JSON.stringify(req.body));
     const exitType = Number(quantity) < 0 ? "BUY" : "SELL";
     console.log('Inverted type for release:', exitType);
-    const ret = await createOrderPayload(exitType, symbol, quant, price);
+    const ret = await createOrderPayload(userId, exitType, symbol, quant, price);
 
     if (!ret.status || ret.status === false) {
         return res.status(ret.code).json({ error: 'Failed to create order payload: '+JSON.stringify(ret), details: ret.error || ret.details });
@@ -481,47 +580,47 @@ app.delete('/api/devices/:id', async (req, res, next) => {
 // Auto-exit monitor for stop-loss
 setInterval(async () => {
   try {
-    if (!globalThis.portfolioId) return;
-    //console.log('Auto-exit monitor checking portfolio:', globalThis.portfolioId);
+    // Iterate through all users and check their portfolios
+    for (const [userId, portfolioId] of userPortfolios.entries()) {
+      const { portfolioData, instrumentData } = await portfolioDetails(userId);
+      if (!portfolioData || !instrumentData) continue;
 
-    const { portfolioData, instrumentData } = await portfolioDetails();
-    if (!portfolioData || !instrumentData) return;
+      const transformedRows = transformPortfolioResponse(portfolioData);
+      const instrumentInfo = transformInstrumentInfo(instrumentData);
+      const combined = enrichPortfolioWithInstruments(transformedRows, instrumentInfo);
 
-    const transformedRows = transformPortfolioResponse(portfolioData);
-    const instrumentInfo = transformInstrumentInfo(instrumentData);
-    const combined = enrichPortfolioWithInstruments(transformedRows, instrumentInfo);
+      for (const position of combined) {
+        if (position.quantity === 0) continue;
 
-    for (const position of combined) {
-      if (position.quantity === 0) continue;
+        // Check if current time in IST is greater than 10:20 AM
+        const istTime = new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        }).format(new Date());
+        const [h, m] = istTime.split(':').map(Number);
+        const afterCutoff = (h * 60 + m) > (10 * 60 + 20) && (h * 60 + m) < (15 * 60 + 10); // after 10:20 AM and before 3:10 PM
 
-      // Check if current time in IST is greater than 10:20 AM
-      const istTime = new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false
-      }).format(new Date());
-      const [h, m] = istTime.split(':').map(Number);
-      const afterCutoff = (h * 60 + m) > (10 * 60 + 20) && (h * 60 + m) < (15 * 60 + 10); // after 10:20 AM and before 3:10 PM
+        const shouldExit = afterCutoff && (
+          position.quantity < 0 
+            ? position.ltp >= position.stop_loss 
+            : position.ltp <= position.stop_loss
+        );
 
-      const shouldExit = afterCutoff && (
-        position.quantity < 0 
-          ? position.ltp >= position.stop_loss 
-          : position.ltp <= position.stop_loss
-      );
+        if (shouldExit) {
+          console.log(`Auto-exit triggered for ${position.symbol}: LTP=${position.ltp}, SL=${position.stop_loss} at time:${istTime}`);
 
-      if (shouldExit) {
-        console.log(`Auto-exit triggered for ${position.symbol}: LTP=${position.ltp}, SL=${position.stop_loss} at time:${istTime}`);
+          const exitType = position.quantity < 0 ? "BUY" : "SELL";
+          const exitQuantity = Math.abs(position.quantity);
 
-        const exitType = position.quantity < 0 ? "BUY" : "SELL";
-        const exitQuantity = Math.abs(position.quantity);
+          const ret = await createOrderPayload(userId, exitType, position.symbol, exitQuantity, position.ltp);
 
-        const ret = await createOrderPayload(exitType, position.symbol, exitQuantity, position.ltp);
-
-        if (ret.status) {
-          console.log(`Successfully auto-exited ${position.symbol}`);
-        } else {
-          console.error(`Failed to auto-exit ${position.symbol}:`, ret.error);
+          if (ret.status) {
+            console.log(`Successfully auto-exited ${position.symbol}`);
+          } else {
+            console.error(`Failed to auto-exit ${position.symbol}:`, ret.error);
+          }
         }
       }
     }
@@ -531,9 +630,16 @@ setInterval(async () => {
 }, 5000); // Check every 5 seconds
 
 // Function calls
-async function createOrderPayload(action, symbol, quantity, price) {
+async function createOrderPayload(userId, action, symbol, quantity, price) {
   // Implementation here
   const callbackUrl = 'https://oxide.sensibull.com/v1/compute/vt2/order'; // <-- paper trading endpoint
+  const accessToken = getUserAccessToken(userId);
+  const paperTradeGroupId = getUserPaperTradeGroup(userId) || '';
+  
+  if (!accessToken) {
+    return { status: false, error: 'No access token found for user', code: 401 };
+  }
+  
   const payload = {
     orders: [
     {
@@ -578,9 +684,16 @@ async function createOrderPayload(action, symbol, quantity, price) {
     }
 }
 
-async function portfolioList() {
+async function portfolioList(userId) {
   // Implementation here
   const Url = 'https://oxide.sensibull.com/v1/compute/vt2/portfolio_list/'; // <-- paper trading endpoint
+  const accessToken = getUserAccessToken(userId);
+  
+  if (!accessToken) {
+    console.log(`No access token found for user ${userId}`);
+    return [];
+  }
+  
   const payload = {
     "is_initial_load":false,
     "page_index":0,
@@ -615,9 +728,22 @@ async function portfolioList() {
     }
 }
 
-async function portfolioDetails() {
+async function portfolioDetails(userId) {
   // Implementation here
+  const accessToken = getUserAccessToken(userId);
+  const portfolioId = getUserPortfolio(userId);
   const Url = 'https://oxide.sensibull.com/v1/compute/vt2/portfolio_details/' + portfolioId; // <-- paper trading endpoint
+  
+  
+  if (!accessToken) {
+    console.log(`No access token found for user ${userId}`);
+    return { portfolioData: null, instrumentData: null };
+  }
+  else if (!portfolioId) {
+    console.log(`No portfolioId found for user ${userId}`);
+    return { portfolioData: null, instrumentData: null };
+  }
+  
   const payload = {
     "is_initial_load":true,
     "expanded_groups":[],
@@ -654,7 +780,12 @@ async function portfolioDetails() {
       const portfolioData = respJson.payload.groups[0].positions_per_underlying || {};
       const instrumentData = respJson.payload.instrument_info || {};
       //const orderBookGroups = respJson.payload.groups[0].orders || {};
-      globalThis.paperTradeGroupId = respJson.payload.groups[0].id || '';
+      const paperTradeGroupId = respJson.payload.groups[0].id || '';
+      
+      // Store paper trade group for this user
+      if (paperTradeGroupId) {
+        setUserPaperTradeGroup(userId, paperTradeGroupId);
+      }
 
       return { portfolioData, instrumentData };
     } catch (e) {
@@ -721,9 +852,15 @@ function enrichPortfolioWithInstruments(portfolio, instrumentInfo) {
   });
 }
 
-async function presentStrategy(stratergy_name="SHORT_STRADDLE", expiry_date="2025-12-16", underlying_token=256265) {
+async function presentStrategy(userId, stratergy_name="SHORT_STRADDLE", expiry_date="2025-12-16", underlying_token=256265) {
   // Implementation here
   const Url = 'https://oxide.sensibull.com/v1/compute/1/presets';
+  const accessToken = getUserAccessToken(userId);
+  
+  if (!accessToken) {
+    return { status: false, error: 'No access token found for user', code: 401 };
+  }
+  
   const payload =  {
       expiry: expiry_date,
       strategy_type: stratergy_name,
@@ -758,8 +895,16 @@ async function presentStrategy(stratergy_name="SHORT_STRADDLE", expiry_date="202
     }
 }
 
-async function IsvalidToken() {
-  const Url = 'https://oxide.sensibull.com/v1/compute/1/broker_data/user_ato';
+async function IsvalidToken(userId, token) {
+  //const Url = 'https://oxide.sensibull.com/v1/compute/1/broker_data/user_ato';
+  const Url = 'https://api.sensibull.com/v1/users/me?source=platform';
+  const accessToken = token ? token : getUserAccessToken(userId);
+  
+  if (!accessToken) {
+    console.log(`No access token found for user ${userId}`);
+    return false;
+  }
+  
   try {
     const resp = await fetch(Url, {
       method: 'GET',
@@ -771,7 +916,15 @@ async function IsvalidToken() {
       return false;
     }
     const respJson = await resp.json().catch(() => null);
-    return respJson.success; // If we get success response true, token is valid
+    if (respJson && respJson.data && respJson.data.external_user_id) {
+      const externalUserId = respJson.data.external_user_id;
+      //return json.externalUserId === userId;
+      setUserAccessToken(externalUserId, token.trim()); // Store token for this user
+      return { status: true, user_id: externalUserId };
+    }
+    
+    return false; // If response structure is unexpected, treat as invalid
+
   } catch (e) {
     console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
     return false;

@@ -42,14 +42,14 @@ function getAccessToken(username) {
   return accessTokens[username] || null;
 }
 
-switchUserBtn.addEventListener('click', async () => {
+/*switchUserBtn.addEventListener('click', async () => {
   const username = userSelect.value.trim();
   if (!username) return setStatus('Please select a user', true);
   setCurrentUser(username);
   getPortfolioBtn.click(); // Refresh portfolio for new user
   await refresh();
   setStatus(`Switched to user: ${username}`, false);
-});
+});*/
 
 let devices = [];
 
@@ -80,12 +80,13 @@ authBtn.addEventListener('click', async () => {
     setCurrentUser(res.user);
     switchUserBtn.click();
     setStatus(`${res.message}`, false);
+    await refresh();
   } catch (e) {
     setStatus(parseError(e), true);
   }
 });
 
-getPortfolioBtn.addEventListener('click', async () => {
+/*getPortfolioBtn.addEventListener('click', async () => {
   try {
     const res = await postJSON(`${API}/getPortfolioId`, { });
 
@@ -118,7 +119,7 @@ getPortfolioBtn.addEventListener('click', async () => {
   } catch (e) {
     setStatus(parseError(e), true);
   }
-});
+});*/
 
 portfolioSelect.addEventListener('change', async ()  => {
   try {

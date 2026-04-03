@@ -362,14 +362,13 @@ app.put('/api/devices/:id/chsl', async (req, res, next) => {
     }
 
     // Fetch current portfolio to find the position
-    const { portfolioData, instrumentData } = await portfolioDetails(userId);
-    if (!portfolioData || !instrumentData) {
+    const { portfolioData } = await portfolioDetails(userId);
+    if (!portfolioData) {
       return res.status(404).json({ error: 'Portfolio not found' });
     }
 
     const transformedRows = transformPortfolioResponse(portfolioData);
-    const instrumentInfo = transformInstrumentInfo(instrumentData);
-    const combined = enrichPortfolioWithInstruments(transformedRows, instrumentInfo);
+    const combined = enrichPortfolioWithInstruments(transformedRows);
 
     //console.log('combined:', combined);  // <-- debug log
 
@@ -440,13 +439,14 @@ app.post('/api/setPortfolioId', async (req, res, next) => {
 // list portfolio
 app.get('/api/portfolio', async (req, res, next) => {
   try {
+    await downloadInstrumentsCSV(); // <-- download instrument info CSV
     const userId = getRequestUserId(req);
     if (!userId) {
       return res.status(401).json({ error: 'X-User-Id header is required' });
     }
 
     // Ensure a portfolioId is selected. If not, fetch the portfolio list and pick the first one.
-    let portfolioId = getUserPortfolio(userId);
+    let portfolioId = 'kFNLKfmdkln weF';
     if (!portfolioId) {
       const portfolios = await portfolioList(userId);
       if (!Array.isArray(portfolios) || portfolios.length === 0) {
@@ -467,15 +467,14 @@ app.get('/api/portfolio', async (req, res, next) => {
   // fetch portfolio details after ensuring portfolioId is set
   try {
     const userId = getRequestUserId(req);
-    const { portfolioData, instrumentData } = await portfolioDetails(userId);
-    if (!portfolioData || !instrumentData) {
+    const { portfolioData } = await portfolioDetails(userId);
+    if (!portfolioData) {
       return res.status(304).json({ error: 'No portfolio data.. Please select the portfolio' });
     }
     // console.log('portfolioData:', JSON.stringify(portfolioData)); // <-- debug log
     // console.log('instrumentData:', JSON.stringify(instrumentData)); // <-- debug log
     const transformedRows = transformPortfolioResponse(portfolioData);
-    const instrumentInfo = transformInstrumentInfo(instrumentData);
-    const combined = enrichPortfolioWithInstruments(transformedRows, instrumentInfo);
+    const combined = enrichPortfolioWithInstruments(transformedRows);
     // console.log('combined:', JSON.stringify(combined)); // <-- debug log
     res.json(combined);
   } catch (err) {
@@ -559,14 +558,14 @@ app.delete('/api/devices/:id', async (req, res, next) => {
 // Auto-exit monitor for stop-loss
 setInterval(async () => {
   try {
+    return; // <-- disable auto-exit for now
     // Iterate through all users and check their portfolios
     for (const [userId, portfolioId] of userPortfolios.entries()) {
-      const { portfolioData, instrumentData } = await portfolioDetails(userId);
-      if (!portfolioData || !instrumentData) continue;
+      const { portfolioData } = await portfolioDetails(userId);
+      if (!portfolioData) continue;
 
       const transformedRows = transformPortfolioResponse(portfolioData);
-      const instrumentInfo = transformInstrumentInfo(instrumentData);
-      const combined = enrichPortfolioWithInstruments(transformedRows, instrumentInfo);
+      const combined = enrichPortfolioWithInstruments(transformedRows);
 
       for (const position of combined) {
         if (position.quantity === 0) continue;
@@ -710,90 +709,72 @@ async function portfolioList(userId) {
 async function portfolioDetails(userId) {
   // Implementation here
   const accessToken = getUserAccessToken(userId);
-  const portfolioId = getUserPortfolio(userId);
-  const Url = 'https://oxide.sensibull.com/v1/compute/vt2/portfolio_details/' + portfolioId; // <-- paper trading endpoint
-  
+  const Url = 'https://oxide.sensibull.com/v1/compute/1/broker_data/user_positions_v2?fno=true&equities=false&holdings=false'; // <-- real trading endpoint
   
   if (!accessToken) {
     console.log(`No access token found for user ${userId}`);
-    return { portfolioData: null, instrumentData: null };
+    return { portfolioData: null };
   }
-  else if (!portfolioId) {
-    console.log(`No portfolioId found for user ${userId}`);
-    return { portfolioData: null, instrumentData: null };
-  }
-  
-  const payload = {
-    "is_initial_load":true,
-    "expanded_groups":[],
-    "hide_closed_positions":false,
-    "unchecked_groups":[],
-    "unchecked_positions_per_group":{},
-    "order_book_groups":[]
-  };
 
     try {
       const resp = await fetch(Url, {
-        method: 'POST',
+        method: 'GET',
         headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
-        body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////
       const cloned = resp.clone();
       const respText = await cloned.text().catch(() => '<unreadable>');
       const respJson = JSON.parse(respText);
-      const groups = respJson.payload.groups[0] || {};
-      /*console.log('Upstream response:', {
+      console.log('Upstream response:', {
         status: resp.status,
         statusText: resp.statusText,
         headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
         body: respText,
-        position: JSON.stringify(groups.positions_per_underlying || {}  ),
-        Instru_info: JSON.stringify(respJson.payload.instrument_info || {})
-      });*/
+        data: JSON.stringify(respJson || {}),
+      });
       ////////////////////////////////////////////////////////////
       if (!resp.ok) {
         const text = await resp.text().catch(() => '<unreadable>');
         return console.log(JSON.stringify({ error: resp.statusText, details: text }));
       }
-      const portfolioData = respJson.payload.groups[0].positions_per_underlying || {};
-      const instrumentData = respJson.payload.instrument_info || {};
+      const portfolioData = respJson.data || {};
+      //const instrumentData = respJson.payload.instrument_info || {};
       //const orderBookGroups = respJson.payload.groups[0].orders || {};
-      const paperTradeGroupId = respJson.payload.groups[0].id || '';
+      //const paperTradeGroupId = respJson.payload.groups[0].id || '';
       
       // Store paper trade group for this user
-      if (paperTradeGroupId) {
+      /*if (paperTradeGroupId) {
         setUserPaperTradeGroup(userId, paperTradeGroupId);
-      }
+      }*/
 
-      return { portfolioData, instrumentData };
+      return { portfolioData };
     } catch (e) {
       return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
     }
 }
 
 function transformPortfolioResponse(apiResponse) {
-  const positions = [];
-  Object.values(apiResponse).forEach((underlyingData) => {
-    const underlying = underlyingData.underlying;
-    const positionsList = underlyingData.positions || [];
+  const positions = apiResponse || [];
+  /*Object.values(apiResponse).forEach((underlyingData) => {
+    const underlying = underlyingData.product;
+    const positionsList = [ underlyingData ] || [];
     positionsList.forEach((pos) => {
       positions.push({ ...pos, underlying });
     });
-  });
+  });*/
   //console.log('positions:', JSON.stringify(positions)); // <-- debug log
 
   return positions.map((pos, index) => ({
     id: index + 1,
     underlying: pos.underlying,
-    symbol: pos.tradingsymbol,
-    quantity: pos.open_qty,
-    avg_price: pos.avg_price,
-    ltp: pos.ltp,
-    booked: Math.round(pos.realised_pnl),
-    unbooked: Math.round(pos.unrealised_pnl),
+    symbol: pos.trading_symbol,
+    quantity: pos.quantity,
+    avg_price: pos.average_price,
+    ltp: pos.last_price,
+    booked: Math.round(pos.booked_profit_loss),
+    unbooked: Math.round(pos.unbooked_profit_loss),
     total: Math.round(pos.total_pnl),
-    stop_loss: pos.open_qty < 0 ? Math.round(pos.avg_price * 1.5 * 20) / 20 : Math.round(pos.avg_price * 0.33 * 20) / 20
+    stop_loss: pos.quantity < 0 ? Math.round(pos.average_price * 1.5 * 20) / 20 : Math.round(pos.average_price * 0.33 * 20) / 20
   }));
 }
 
@@ -809,16 +790,11 @@ function transformInstrumentInfo(apiResponse) {
   }));
 }
 
-function enrichPortfolioWithInstruments(portfolio, instrumentInfo) {
-  // Convert instrumentInfo array to a map keyed by symbol for O(1) lookup
-  const instInfoMap = {};
-  instrumentInfo.forEach(inst => {
-    instInfoMap[inst.symbol] = inst;
-  });
+function enrichPortfolioWithInstruments(portfolio) {
 
   // Merge portfolio with instrument info
   return portfolio.map(pos => {
-    const instInfo = instInfoMap[pos.symbol] || {};
+    const instInfo = getInstrumentInfo[pos.symbol] || {};
     return {
       ...pos,
       expiry: instInfo.expiry || null,
@@ -910,6 +886,58 @@ async function IsvalidToken(userId, token) {
   }
 }
 
+async function downloadInstrumentsCSV() {
+  const instrumentsUrl1 = 'https://api.kite.trade/instruments/BFO';
+  const instrumentsUrl2 = 'https://api.kite.trade/instruments/NFO';
+
+  // Ensure fs is always available in this scope
+  const fs = (await import('fs')).default || await import('fs');
+  const csv = (await import('csv-parser')).default || await import('csv-parser');
+  fs.writeFileSync('instruments.csv', ''); // Clear existing file before appending new data
+
+  for (const url of [instrumentsUrl1, instrumentsUrl2]) {
+    try {
+      const resp = await fetch(url);
+      const text = await resp.text();
+      fs.appendFileSync('instruments.csv', text);
+    }
+    catch (err) {
+      console.error(`Failed to fetch from ${url}:`, err);
+    }
+  }
+}
+
+async function getInstrumentInfo(tradingsymbols='SENSEX2640973500PE') {
+  try {
+    const instrumentsMap = {};
+    return await new Promise((resolve, reject) => {
+      fs.createReadStream('instruments.csv')
+        .pipe(csv())
+        .on('data', (row) => {
+          instrumentsMap[row.tradingsymbol] = {
+            instrument_token: parseInt(row.instrument_token),
+            exchange_token: parseInt(row.exchange_token),
+            symbol: row.tradingsymbol,
+            underlying_symbol: row.name,
+            last_price: parseFloat(row.last_price),
+            expiry: row.expiry || '',
+            strike: parseFloat(row.strike) || 0,
+            tick_size: parseFloat(row.tick_size) || 0,
+            lot_size: parseInt(row.lot_size),
+            instrument_type: row.instrument_type === 'CE' ? 'Call' : row.instrument_type === 'PE' ? 'Put' : row.instrument_type
+          };
+        })
+        .on('end', () => resolve(instrumentsMap[tradingsymbols] || {}))
+        .on('error', reject);
+    });
+    return instrumentsMap[tradingsymbols] || {};
+  } catch (err) {
+    console.error(`Failed to fetch from instruments.csv:`, err);
+    return {};
+  }
+}
+
+      
 
 // Global error handler
 app.use((err, _req, res, _next) => {

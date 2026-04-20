@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test:websocket": "node src/test-websocket.js"
   },
   "dependencies": {
     "csv-parser": "^3.2.0",
@@ -14,7 +15,8 @@
     "express": "^4.19.2",
     "morgan": "^1.10.0",
     "otplib": "^12.0.1",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"

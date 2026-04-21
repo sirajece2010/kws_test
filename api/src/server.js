@@ -598,28 +598,32 @@ setInterval(async () => {
 // Function calls
 async function createOrderPayload(userId, action, symbol, quantity, price) {
   // Implementation here
-  const callbackUrl = 'https://oxide.sensibull.com/v1/compute/vt2/order'; // <-- paper trading endpoint
-  const accessToken = getUserAccessToken(userId);
-  const paperTradeGroupId = getUserPaperTradeGroup(userId) || '';
+  const trades = {"tradingsymbol":symbol,"exchange":"NFO","transaction_type":action,"order_type":"LIMIT",
+    "quantity":quantity,"price":price,"product":"NRML","validity":"DAY"}
+  let basket_info = await createBasket(userId, trades); // <-- ensure basket is created before placing orders
   
+  const callbackUrl = `https://oxide.sensibull.com/v1/pluto/pbp/order/place/1/${basket_info.basket_order_id}`; // <-- real trading endpoint here 1 is a broker_id for zerodha.
+  const accessToken = getUserAccessToken(userId);
+
   if (!accessToken) {
     return { status: false, error: 'No access token found for user', code: 401 };
   }
   
   const payload = {
+    basket_id: basket_info.basket_order_id,
     orders: [
     {
-      action: action,
-      lot_size: (Number(quantity)),
-      origin: "PAPER_NEW",
+      basket_order_entry_id: basket_info.basket_order_entry.basket_order_entry_id,
+      market_protection: true,
+      order_type: "LIMIT",
       price: (Number(price)),
-      product_type: "NRML",
-      quantity: action === "SELL" ? -(Number(quantity)) : (Number(quantity)),
-      tradingsymbol: symbol,
-      timestamp: new Date().toISOString()
-    }
+      product: "NRML",
+      quantity: (Number(quantity)),
+      transaction_type: action,
+      trigger_price: 0,
+      validity: "DAY" }
     ],
-    paper_trade_group_id: paperTradeGroupId
+    place_mode: "PLACE_INDIVIDUAL_ORDER"
   };
 
     try {
@@ -648,6 +652,47 @@ async function createOrderPayload(userId, action, symbol, quantity, price) {
     } catch (e) {
       return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
     }
+}
+
+async function createBasket(userId, trades) {
+  // Implementation here
+    const Url = 'https://oxide.sensibull.com/v1/pluto/pbp/init_and_fetch/1';
+    const accessToken = getUserAccessToken(userId);
+
+    const payload = {
+      "device":"WEB_DESKTOP",
+      "feature":"SB_POSITIONS",
+      "trades": [trades],
+      "is_quick_trade":true,
+    }
+
+    try {
+      const resp = await fetch(Url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        body: JSON.stringify(payload),
+      });
+      /*////////////////////// Debugging info //////////////////////
+      const cloned = resp.clone();
+      const respText = await cloned.text().catch(() => '<unreadable>');
+      const respJson = JSON.parse(respText);
+      console.log('createBasket Upstream response:', {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
+        body: respText
+      });
+      ////////////////////////////////////////////////////////////*/
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '<unreadable>');
+        console.log(JSON.stringify({ error: resp.statusText, details: text }));
+        return [];
+      }
+      return { basket_order_id: respJson.payload.basket_order.basket_order_id, basket_order_entry: respJson.payload.basket_page_data.basket_order_entries[0].basket_order_entries[0]} || [] ;
+    } catch (e) {
+      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+    }
+
 }
 
 async function portfolioList(userId) {

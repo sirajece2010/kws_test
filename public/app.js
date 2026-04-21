@@ -214,7 +214,7 @@ function render() {
       try {
         await postJSON(`${API}/devices/${d.id}/exit`, { symbol: d.symbol, quantity: d.quantity, price: d.ltp, lot_size: d.lot_size, type: ordertype });
         await refresh();
-        setStatus(`Exited ${d.symbol}`, false);
+        setStatus(`Exit order created for ${d.symbol}`, false);
       } catch (e) {
         setStatus(parseError(e), true);
       }

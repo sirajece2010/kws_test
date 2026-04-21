@@ -181,12 +181,20 @@ function render() {
     exitBtn.disabled = !allocated;
     exitBtn.onclick = async () => {
       const price = prompt('Enter exit price:', d.ltp);
+      let OrderType = 'LIMIT';
       if (!price || !price.trim()) return;
       if (!confirm(`Exit ${d.symbol} at price ${price.trim()}?`)) return;
+      if ((d.ltp < price.trim() && ordertype === 'SELL') || (d.ltp > price.trim() && ordertype === 'BUY')) {
+        OrderType = 'SL';
+      }
       try {
-        await postJSON(`${API}/devices/${d.id}/exit`, { symbol: d.symbol, quantity: d.quantity, price: Number(price), lot_size: d.lot_size, type: ordertype });
+        await postJSON(`${API}/devices/${d.id}/exit`, { symbol: d.symbol, quantity: d.quantity, price: Number(price), lot_size: d.lot_size, type: ordertype, ordertype: OrderType });
         await refresh();
-        setStatus(`Exit order created for ${d.symbol}`, false);
+        if (OrderType === 'SL') {
+          setStatus(`SL order created for ${d.symbol}`, false);
+        } else {
+          setStatus(`Exit order created for ${d.symbol}`, false);
+        }
       } catch (e) {
         setStatus(parseError(e), true);
       }

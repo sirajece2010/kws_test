@@ -472,7 +472,7 @@ app.post('/api/devices/:id/exit', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const userId = getRequestUserId(req);
-    const { symbol, quantity, price, lot_size, type } = req.body;
+    const { symbol, quantity, price, lot_size, type, ordertype } = req.body;
     
     if (!userId) {
       return res.status(401).json({ error: 'X-User-Id header is required' });
@@ -483,7 +483,7 @@ app.post('/api/devices/:id/exit', async (req, res, next) => {
     console.log('Request body:', JSON.stringify(req.body));
     const exitType = Number(quantity) < 0 ? "BUY" : "SELL";
     console.log('Inverted type for release:', exitType);
-    const ret = await createOrderPayload(userId, exitType, symbol, quant, price);
+    const ret = await createOrderPayload(userId, exitType, symbol, quant, price, ordertype);
 
     if (!ret.status || ret.status === false) {
         return res.status(ret.code).json({ error: 'Failed to create order payload: '+JSON.stringify(ret), details: ret.error || ret.details });
@@ -562,10 +562,10 @@ setInterval(async () => {
 }, 5000); // Check every 5 seconds
 
 // Function calls
-async function createOrderPayload(userId, action, symbol, quantity, price) {
+async function createOrderPayload(userId, action, symbol, quantity, price, orderType = "LIMIT") {
   // Implementation here
-  const trades = {"tradingsymbol":symbol,"exchange":"NFO","transaction_type":action,"order_type":"LIMIT",
-    "quantity":quantity,"price":price,"product":"NRML","validity":"DAY"}
+  const trades = {"tradingsymbol":symbol,"exchange":"NFO","transaction_type":action,"order_type":orderType,
+    "quantity":quantity,"price":price,"trigger_price":price,"product":"NRML","validity":"DAY"}
   let basket_info = await createBasket(userId, trades); // <-- ensure basket is created before placing orders
   
   const callbackUrl = `https://oxide.sensibull.com/v1/pluto/pbp/order/place/1/${basket_info.basket_order_id}`; // <-- real trading endpoint here 1 is a broker_id for zerodha.

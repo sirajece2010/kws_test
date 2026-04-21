@@ -7,7 +7,6 @@ const newName = document.getElementById('new-name');
 const newSerial = document.getElementById('new-serial');
 const newStrike = document.getElementById('new-strike');
 const newQuantity = document.getElementById('new-quantity');
-const createBtn = document.getElementById('create-btn');
 const authBtn = document.getElementById('auth-btn');
 const getPortfolioBtn = document.getElementById('get-portfolio-btn');
 const portfolioSelect = document.getElementById('portfolio-select');
@@ -54,23 +53,6 @@ function getAccessToken(username) {
 let devices = [];
 
 searchInput.addEventListener('input', () => render());
-
-createBtn.addEventListener('click', async () => {
-  const symbol = newName.value.trim();
-  const token = newSerial.value.trim();
-  const strike = newStrike.value.trim();
-  const quantity = newQuantity.value.trim();
-  if (!symbol || !token) return setStatus('Symbol and Token are required', true);
-
-  try {
-    await postJSON(`${API}/devices`, { symbol, token, strike, quantity });
-    newName.value = ''; newSerial.value = '';
-    await refresh();
-    setStatus('Instrument added', false);
-  } catch (e) {
-    setStatus(parseError(e), true);
-  }
-});
 
 authBtn.addEventListener('click', async () => {
   try {

@@ -672,10 +672,10 @@ async function createBasket(userId, trades) {
         headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
         body: JSON.stringify(payload),
       });
-      /*////////////////////// Debugging info //////////////////////
       const cloned = resp.clone();
       const respText = await cloned.text().catch(() => '<unreadable>');
       const respJson = JSON.parse(respText);
+      /*////////////////////// Debugging info //////////////////////
       console.log('createBasket Upstream response:', {
         status: resp.status,
         statusText: resp.statusText,

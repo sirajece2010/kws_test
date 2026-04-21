@@ -121,19 +121,6 @@ authBtn.addEventListener('click', async () => {
   }
 });*/
 
-portfolioSelect.addEventListener('change', async ()  => {
-  try {
-    const portfolioId = portfolioSelect.value;
-    const portfolioName = portfolioSelect.options[portfolioSelect.selectedIndex].textContent;
-    if (!portfolioId || !portfolioId.trim()) return;
-    await postJSON(`${API}/setPortfolioId`, { portfolioId: portfolioId.trim() });
-    await refresh();
-    setStatus(`Portfolio set to: ${portfolioName.trim()}`, false);
-  } catch (e) {
-    setStatus(parseError(e), true);
-  }
-});
-
 // --- main functions ---
 
 async function refresh() {
@@ -141,6 +128,7 @@ async function refresh() {
     //devices = await getJSON(`${API}/devices`);
     console.log('Fetching portfolio data...');
     devices = await getJSON(`${API}/portfolio`);;
+    setStatus(`Portfolio data refreshed. ${devices.length} devices loaded.`, false);
     //result = await postJSON(`${API}/devices/sync`, { devices });
     //setStatus(`Sync result: ${JSON.stringify(result)}`, false);
     render();
@@ -195,12 +183,12 @@ function render() {
     addBtn.textContent = 'Add';
     addBtn.disabled = !allocated;
     addBtn.onclick = async () => {
-      const losts = prompt('How many lots to add?');
+      const losts = prompt('How many lots to add?', '1');
       if (!losts || !losts.trim()) return;
       try {
         await postJSON(`${API}/devices/${d.id}/addmore`, { symbol: d.symbol, lots: losts.trim(), price: d.ltp, lot_size: d.lot_size, type: ordertype });
         await refresh();
-        setStatus(`Added ${losts.trim()} lots of ${d.symbol}`, false);
+        setStatus(`Create Order added ${losts.trim()} lots of ${d.symbol}`, false);
       } catch (e) {
         setStatus(parseError(e), true);
       }
@@ -210,9 +198,11 @@ function render() {
     exitBtn.textContent = 'Exit';
     exitBtn.disabled = !allocated;
     exitBtn.onclick = async () => {
-      if (!confirm(`Exit ${d.symbol}?`)) return;
+      const price = prompt('Enter exit price:', d.ltp);
+      if (!price || !price.trim()) return;
+      if (!confirm(`Exit ${d.symbol} at price ${price.trim()}?`)) return;
       try {
-        await postJSON(`${API}/devices/${d.id}/exit`, { symbol: d.symbol, quantity: d.quantity, price: d.ltp, lot_size: d.lot_size, type: ordertype });
+        await postJSON(`${API}/devices/${d.id}/exit`, { symbol: d.symbol, quantity: d.quantity, price: Number(price), lot_size: d.lot_size, type: ordertype });
         await refresh();
         setStatus(`Exit order created for ${d.symbol}`, false);
       } catch (e) {
@@ -227,7 +217,7 @@ function render() {
         const stoploss = prompt('Enter the new Stop Loss value:');
       if (!stoploss || !stoploss.trim()) return;
       try {
-        await putJSON(`${API}/devices/${d.id}/chsl`, { stop_loss: stoploss.trim(), symbol: d.symbol });
+        await putJSON(`${API}/devices/${d.id}/chsl`, { stop_loss: Number(stoploss.trim()), symbol: d.symbol });
         await refresh();
         setStatus(`StopLoss Updated to ${stoploss.trim()}`, false);
       } catch (e) {

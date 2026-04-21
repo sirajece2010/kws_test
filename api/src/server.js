@@ -403,40 +403,6 @@ app.put('/api/devices/:id/chsl', async (req, res, next) => {
   }
 });
 
-app.post('/api/getPortfolioId', async (req, res, next) => {
-  try {
-    const userId = getRequestUserId(req);
-    if (!userId) {
-      return res.status(401).json({ error: 'X-User-Id header is required' });
-    }
-    portfolioList(userId).then((data) => {
-      res.json(data);
-    });
-
-  } catch (err) {
-    next(err);
-  }
-});
-
-app.post('/api/setPortfolioId', async (req, res, next) => {
-  try {
-    const userId = getRequestUserId(req);
-    const { portfolioId } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({ error: 'X-User-Id header is required' });
-    }
-    if (typeof portfolioId !== 'string' || !portfolioId.trim()) {
-      return res.status(400).json({ error: 'portfolioId is required' });
-    }
-
-    setUserPortfolio(userId, portfolioId.trim());
-    res.json({ status: 'Success', portfolioId: portfolioId.trim() });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // -------- Allocation actions --------
 // list portfolio
 app.get('/api/portfolio', async (req, res, next) => {
@@ -693,50 +659,6 @@ async function createBasket(userId, trades) {
       return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
     }
 
-}
-
-async function portfolioList(userId) {
-  // Implementation here
-  const Url = 'https://oxide.sensibull.com/v1/compute/vt2/portfolio_list/'; // <-- paper trading endpoint
-  const accessToken = getUserAccessToken(userId);
-  
-  if (!accessToken) {
-    console.log(`No access token found for user ${userId}`);
-    return [];
-  }
-  
-  const payload = {
-    "is_initial_load":false,
-    "page_index":0,
-    "page_size":20,
-    "sort_field":"updatedat"
-  };
-    try {
-      const resp = await fetch(Url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
-        body: JSON.stringify(payload),
-      });
-      ////////////////////// Debugging info //////////////////////
-      /*const cloned = resp.clone();
-      const respText = await cloned.text().catch(() => '<unreadable>');
-      console.log('Upstream response:', {
-        status: resp.status,
-        statusText: resp.statusText,
-        headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
-        body: respText
-      });*/
-      ////////////////////////////////////////////////////////////
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => '<unreadable>');
-        console.log(JSON.stringify({ error: resp.statusText, details: text }));
-        return [];
-      }
-      const respJson = await resp.json().catch(() => null);
-      return respJson.payload.portfolios || [];
-    } catch (e) {
-      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
-    }
 }
 
 async function portfolioDetails(userId) {

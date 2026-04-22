@@ -581,12 +581,12 @@ async function createOrderPayload(userId, action, symbol, quantity, price, order
     {
       basket_order_entry_id: basket_info.basket_order_entry.basket_order_entry_id,
       market_protection: true,
-      order_type: "LIMIT",
-      price: (Number(price)),
+      order_type: orderType,
+      price: Number(price),
       product: "NRML",
-      quantity: (Number(quantity)),
+      quantity: Number(quantity),
       transaction_type: action,
-      trigger_price: 0,
+      trigger_price: orderType === "SL" ? Number(price) : 0,
       validity: "DAY" }
     ],
     place_mode: "PLACE_INDIVIDUAL_ORDER"

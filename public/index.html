@@ -61,47 +61,47 @@
       <button class="subtab-btn" type="button" role="tab" aria-selected="false" data-subtab-target="inventory-orders">Orders</button>
     </div>
 
-  <div class="subtab-panel active" id="inventory-positions">
-    <div class="controls">
-      <input id="search" type="text" placeholder="Search by name or serial" />
-      <form id="create-form" onsubmit="return false;">
-        <!--input id="new-name" type="text" placeholder="Symbol name" required />
-        <input id="new-serial" type="text" placeholder="Token (unique)" required />
-        <input id="new-strike" type="text" placeholder="Strike" required />
-        <input id="new-quantity" type="text" placeholder="Quantity" required /-->
-        <!--<button id="create-btn">Add Symbol</button-->
-        <button id="auth-btn">Authenticate</button>
-        <!--select id="portfolio-select" required>
-          <option value="">Select Portfolio</option>
-        </select-->
-        <!--button id="get-portfolio-btn">Get Portfolio</button-->
-      </form>
-      <span id="status" class="muted"></span>
-    </div>
+    <div class="subtab-panel active" id="inventory-positions">
+      <div class="controls">
+        <input id="search" type="text" placeholder="Search by name or serial" />
+        <form id="create-form" onsubmit="return false;">
+          <!--input id="new-name" type="text" placeholder="Symbol name" required />
+          <input id="new-serial" type="text" placeholder="Token (unique)" required />
+          <input id="new-strike" type="text" placeholder="Strike" required />
+          <input id="new-quantity" type="text" placeholder="Quantity" required /-->
+          <!--<button id="create-btn">Add Symbol</button-->
+          <button id="auth-btn">Authenticate</button>
+          <!--select id="portfolio-select" required>
+            <option value="">Select Portfolio</option>
+          </select-->
+          <!--button id="get-portfolio-btn">Get Portfolio</button-->
+        </form>
+        <span id="status" class="muted"></span>
+      </div>
 
-    <table>
-      <thead>
-        <tr>
-          <th>S.No</th>
-          <th>Symbol</th>
-          <th>Inst_Token</th>
-          <th>Type</th>
-          <th>Status</th>
-          <th>Strike</th>
-          <th>Quantity</th>
-          <th>Avg Price</th>
-          <th>LTP</th>
-          <th>Booked P&L</th>
-          <th>Unbooked P&L</th>
-          <th>Stop Loss</th>
-          <th>Total P&L</th>
-          <th>Expires_on</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="tbody"></tbody>
-    </table>
-  </div>
+      <table>
+        <thead>
+          <tr>
+            <th>S.No</th>
+            <th>Symbol</th>
+            <th>Inst_Token</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Strike</th>
+            <th>Quantity</th>
+            <th>Avg Price</th>
+            <th>LTP</th>
+              <th>Booked P&amp;L</th>
+              <th>Unbooked P&amp;L</th>
+            <th>Stop Loss</th>
+              <th>Total P&amp;L</th>
+            <th>Expires_on</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
 
     <div class="subtab-panel" id="inventory-orders">
       <div class="dummy-card">

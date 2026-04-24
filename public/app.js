@@ -74,9 +74,22 @@ createBtn.addEventListener('click', async () => {
 
 authBtn.addEventListener('click', async () => {
   try {
-    const secretKey = prompt('Enter the secret key to Authenticate:');
+    const selectedUser = (userSelect.value || currentUser || '').trim();
+    if (!selectedUser) {
+      setStatus('Please select a user before authenticating', true);
+      return;
+    }
 
-    const res = await postJSON(`${API}/authenticate`, { secretkey: secretKey });
+    const secretKey = prompt('Enter the secret key to Authenticate:');
+    if (!secretKey || !secretKey.trim()) {
+      setStatus('Authentication cancelled: secret key is required', true);
+      return;
+    }
+
+    // Ensure X-User-Id header is present for /api/authenticate.
+    setCurrentUser(selectedUser);
+
+    const res = await postJSON(`${API}/authenticate`, { secretkey: secretKey.trim() });
     setCurrentUser(res.user);
     switchUserBtn.click();
     setStatus(`${res.message}`, false);
@@ -314,5 +327,71 @@ function parseError(e) {
     return e.message;
   }
 }
+
+// --- navigation and subtabs ---
+function initPrimaryNavigation() {
+  const navLinks = Array.from(document.querySelectorAll('.dummy-nav a[data-tab-target]'));
+  const primaryPanels = Array.from(document.querySelectorAll('.primary-panel'));
+  if (!navLinks.length || !primaryPanels.length) return;
+
+  function activatePrimaryPanel(targetId) {
+    if (!targetId) return;
+
+    navLinks.forEach(link => {
+      const isActive = link.getAttribute('data-tab-target') === targetId;
+      link.setAttribute('aria-current', isActive ? 'page' : 'false');
+    });
+
+    primaryPanels.forEach(panel => {
+      panel.classList.toggle('active', panel.id === targetId);
+    });
+  }
+
+  navLinks.forEach(link => {
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      activatePrimaryPanel(link.getAttribute('data-tab-target'));
+    });
+  });
+}
+
+function initSubtabs() {
+  const subtabGroups = Array.from(document.querySelectorAll('[data-subtabs]'));
+
+  subtabGroups.forEach(group => {
+    const subtabButtons = Array.from(group.querySelectorAll('.subtab-btn[data-subtab-target]'));
+    const parentPanel = group.closest('.primary-panel');
+    const subtabPanels = parentPanel
+      ? Array.from(parentPanel.querySelectorAll('.subtab-panel'))
+      : [];
+
+    if (!subtabButtons.length || !subtabPanels.length) return;
+
+    function activateSubtab(targetId) {
+      if (!targetId) return;
+
+      subtabButtons.forEach(button => {
+        const isActive = button.getAttribute('data-subtab-target') === targetId;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+
+      subtabPanels.forEach(panel => {
+        panel.classList.toggle('active', panel.id === targetId);
+      });
+    }
+
+    subtabButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        activateSubtab(button.getAttribute('data-subtab-target'));
+      });
+    });
+  });
+}
+
+initPrimaryNavigation();
+initSubtabs();
+
+
 
 refresh().catch(err => setStatus(parseError(err), true));

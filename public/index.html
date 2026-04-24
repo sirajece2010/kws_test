@@ -9,6 +9,17 @@
     :root { font-family: system-ui, sans-serif; }
     body { max-width: 1000px auto; margin: 32px auto; padding: 0 8px; }
     h1 { margin-bottom: 8px; }
+    .dummy-nav { display: flex; gap: 14px; margin: 12px 0 16px; padding: 10px 12px; background: #f7f0f0; border: 1px solid #e4d0d0; border-radius: 10px; }
+    .dummy-nav a { color: #7a3f3f; text-decoration: none; font-weight: 600; }
+    .dummy-nav a:hover { text-decoration: underline; }
+    .subtabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .subtab-btn { border: 1px solid #c6a3a3; background: #fff; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .subtab-btn.active { background: #c68e8e; color: #fff; border-color: #c68e8e; }
+    .primary-panel { display: none; }
+    .primary-panel.active { display: block; }
+    .subtab-panel { display: none; }
+    .subtab-panel.active { display: block; }
+    .dummy-card { border: 1px solid #e6dede; background: #fffafa; border-radius: 10px; padding: 16px; margin-bottom: 12px;
     .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
     input, button { padding: 8px; }
     table { width: 100%; border-collapse: collapse; }
@@ -27,6 +38,14 @@
 <body>
   <div class="user-label">&#128100; <span id="username-label">Guest</span></div>
   <h1>Open Options(Prod)</h1>
+  <nav class="dummy-nav" aria-label="Main Navigation">
+    <a href="#panel-inventory" aria-current="page" data-tab-target="panel-inventory">Dashboard</a>
+    <a href="#panel-signals" data-tab-target="panel-signals">Signals</a>
+    <a href="#panel-reports" data-tab-target="panel-reports">Reports</a>
+    <a href="#panel-settings" data-tab-target="panel-settings">Settings</a>
+    <a href="#panel-kite-app" data-tab-target="panel-kite-app">KITE APP</a>
+  </nav>
+
   <div class="controls" style="position: fixed; bottom: 20px; left: 20px; width: auto;">
     <select id="user-select">
       <option value="">Select User</option>
@@ -35,45 +54,146 @@
     </select>
     <button id="switch-user-btn">Switch User</button>
   </div>
-  <div class="controls">
-    <input id="search" type="text" placeholder="Search by name or serial" />
-    <form id="create-form" onsubmit="return false;">
-      <!--input id="new-name" type="text" placeholder="Symbol name" required />
-      <input id="new-serial" type="text" placeholder="Token (unique)" required />
-      <input id="new-strike" type="text" placeholder="Strike" required />
-      <input id="new-quantity" type="text" placeholder="Quantity" required /-->
-      <!--<button id="create-btn">Add Symbol</button-->
-      <button id="auth-btn">Authenticate</button>
-      <!--select id="portfolio-select" required>
-        <option value="">Select Portfolio</option>
-      </select-->
-      <!--button id="get-portfolio-btn">Get Portfolio</button-->
-    </form>
-    <span id="status" class="muted"></span>
+
+  <section class="primary-panel active" id="panel-inventory">
+    <div class="subtabs" role="tablist" aria-label="Dashboard Tabs" data-subtabs>
+      <button class="subtab-btn active" type="button" role="tab" aria-selected="true" data-subtab-target="inventory-positions">Positions</button>
+      <button class="subtab-btn" type="button" role="tab" aria-selected="false" data-subtab-target="inventory-orders">Orders</button>
+    </div>
+
+  <div class="subtab-panel active" id="inventory-positions">
+    <div class="controls">
+      <input id="search" type="text" placeholder="Search by name or serial" />
+      <form id="create-form" onsubmit="return false;">
+        <!--input id="new-name" type="text" placeholder="Symbol name" required />
+        <input id="new-serial" type="text" placeholder="Token (unique)" required />
+        <input id="new-strike" type="text" placeholder="Strike" required />
+        <input id="new-quantity" type="text" placeholder="Quantity" required /-->
+        <!--<button id="create-btn">Add Symbol</button-->
+        <button id="auth-btn">Authenticate</button>
+        <!--select id="portfolio-select" required>
+          <option value="">Select Portfolio</option>
+        </select-->
+        <!--button id="get-portfolio-btn">Get Portfolio</button-->
+      </form>
+      <span id="status" class="muted"></span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>S.No</th>
+          <th>Symbol</th>
+          <th>Inst_Token</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Strike</th>
+          <th>Quantity</th>
+          <th>Avg Price</th>
+          <th>LTP</th>
+          <th>Booked P&L</th>
+          <th>Unbooked P&L</th>
+          <th>Stop Loss</th>
+          <th>Total P&L</th>
+          <th>Expires_on</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>S.No</th>
-        <th>Symbol</th>
-        <th>Inst_Token</th>
-        <th>Type</th>
-        <th>Status</th>
-        <th>Strike</th>
-        <th>Quantity</th>
-        <th>Avg Price</th>
-        <th>LTP</th>
-        <th>Booked P&L</th>
-        <th>Unbooked P&L</th>
-        <th>Stop Loss</th>
-        <th>Total P&L</th>
-        <th>Expires_on</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
+    <div class="subtab-panel" id="inventory-orders">
+      <div class="dummy-card">
+        <h2>Orders (Dummy)</h2>
+        <p>Recent orders, pending actions, and execution logs can be displayed here.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="primary-panel" id="panel-signals">
+    <div class="subtabs" role="tablist" aria-label="Signals Tabs" data-subtabs>
+      <button class="subtab-btn active" type="button" role="tab" aria-selected="true" data-subtab-target="signals-live">Live Signals</button>
+      <button class="subtab-btn" type="button" role="tab" aria-selected="false" data-subtab-target="signals-history">History</button>
+    </div>
+
+    <div class="subtab-panel active" id="signals-live">
+      <div class="dummy-card">
+        <h2>Live Signals (Dummy)</h2>
+        <p>Realtime entries, momentum checks, and confirmations can be displayed here.</p>
+      </div>
+    </div>
+
+    <div class="subtab-panel" id="signals-history">
+      <div class="dummy-card">
+        <h2>Signal History (Dummy)</h2>
+        <p>Past signal outcomes and performance logs can be displayed here.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="primary-panel" id="panel-reports">
+    <div class="subtabs" role="tablist" aria-label="Reports Tabs" data-subtabs>
+      <button class="subtab-btn active" type="button" role="tab" aria-selected="true" data-subtab-target="reports-daily">Daily</button>
+      <button class="subtab-btn" type="button" role="tab" aria-selected="false" data-subtab-target="reports-summary">Summary</button>
+    </div>
+
+    <div class="subtab-panel active" id="reports-daily">
+      <div class="dummy-card">
+        <h2>Reports (Dummy)</h2>
+        <p>Daily P&amp;L summary, trade heatmap, and top movers can be displayed here.</p>
+      </div>
+    </div>
+
+    <div class="subtab-panel" id="reports-summary">
+      <div class="dummy-card">
+        <h3>Quick Snapshot</h3>
+        <p>Win rate: 58% | Avg risk/reward: 1.6 | Open positions: 4</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="primary-panel" id="panel-settings">
+    <div class="subtabs" role="tablist" aria-label="Settings Tabs" data-subtabs>
+      <button class="subtab-btn active" type="button" role="tab" aria-selected="true" data-subtab-target="settings-general">General</button>
+      <button class="subtab-btn" type="button" role="tab" aria-selected="false" data-subtab-target="settings-alerts">Alerts</button>
+    </div>
+
+    <div class="subtab-panel active" id="settings-general">
+      <div class="dummy-card">
+        <h2>Settings (Dummy)</h2>
+        <p>Execution mode, lot sizing, and preferences can go here.</p>
+      </div>
+    </div>
+
+    <div class="subtab-panel" id="settings-alerts">
+      <div class="dummy-card">
+        <h2>Alert Rules (Dummy)</h2>
+        <p>Thresholds, notifications, and exception policies can go here.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="primary-panel" id="panel-kite-app">
+    <div class="subtabs" role="tablist" aria-label="Kite App Tabs" data-subtabs>
+      <button class="subtab-btn active" type="button" role="tab" aria-selected="true" data-subtab-target="kite-overview">Overview</button>
+      <button class="subtab-btn" type="button" role="tab" aria-selected="false" data-subtab-target="kite-notes">Notes</button>
+    </div>
+
+    <div class="subtab-panel active" id="kite-overview">
+      <div class="dummy-card">
+        <h2>KITE APP</h2>
+        <p>Kite personal app overview can go here.</p>
+      </div>
+    </div>
+
+    <div class="subtab-panel" id="kite-notes">
+      <div class="dummy-card">
+        <h2>KITE Notes (Dummy)</h2>
+        <p>User notes, quick actions, and status notes can be shown here.</p>
+      </div>
+    </div>
+  </section>
 
   <!-- Put script here, not inside the table -->
   <script src="/app.js"></script>

@@ -548,7 +548,7 @@ app.delete('/api/devices/:id', async (req, res, next) => {
 // Auto-exit monitor for stop-loss
 setInterval(async () => {
   try {
-    // return; // <-- disable auto-exit for now
+    return; // <-- disable auto-exit for now
     // Iterate through all users and check their portfolios
     for (const [userId, portfolioId] of userPortfolios.entries()) {
       const { portfolioData } = await portfolioDetails(userId);

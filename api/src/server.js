@@ -40,6 +40,7 @@ await init();
 const userPortfolios = new Map();           // userId -> portfolioId
 const userPaperTradeGroups = new Map();     // userId -> paperTradeGroupId
 const userAccessTokens = new Map();         // userId -> accessToken
+const pendingOrders = new Map();            // userId -> Set of pending order keys (symbol_action)
 const instrumentsMap = {};                  // tradingsymbol -> instrument info
 
 
@@ -420,6 +421,8 @@ app.get('/api/portfolio', async (req, res, next) => {
   // fetch portfolio details after ensuring portfolioId is set
   try {
     const userId = getRequestUserId(req);
+    var portfolioId = Buffer.from(`${userId}:${portfolioId}`).toString('base64');
+    setUserPortfolio(userId, portfolioId);
     const { portfolioData } = await portfolioDetails(userId);
     if (!portfolioData) {
       return res.status(304).json({ error: 'No portfolio data.. Please select the portfolio' });
@@ -512,7 +515,7 @@ app.delete('/api/devices/:id', async (req, res, next) => {
 // Auto-exit monitor for stop-loss
 setInterval(async () => {
   try {
-    return; // <-- disable auto-exit for now
+    // return; // <-- disable auto-exit for now
     // Iterate through all users and check their portfolios
     for (const [userId, portfolioId] of userPortfolios.entries()) {
       const { portfolioData } = await portfolioDetails(userId);
@@ -542,6 +545,7 @@ setInterval(async () => {
 
         if (shouldExit) {
           console.log(`Auto-exit triggered for ${position.symbol}: LTP=${position.ltp}, SL=${position.stop_loss} at time:${istTime}`);
+          // console.log(`Position details:`, JSON.stringify(position)); // <-- debug log
 
           const exitType = position.quantity < 0 ? "BUY" : "SELL";
           const exitQuantity = Math.abs(position.quantity);
@@ -591,6 +595,7 @@ async function createOrderPayload(userId, action, symbol, quantity, price, order
     ],
     place_mode: "PLACE_INDIVIDUAL_ORDER"
   };
+  // console.log('Placing order with payload:', JSON.stringify(payload)); // <-- debug log
 
     try {
       const resp = await fetch(callbackUrl, {
@@ -601,12 +606,12 @@ async function createOrderPayload(userId, action, symbol, quantity, price, order
       ////////////////////// Debugging info //////////////////////
       const cloned = resp.clone();
       const respText = await cloned.text().catch(() => '<unreadable>');
-      /*console.log('Upstream response:', {
+      /* console.log(' createOrder Upstream response:', {
         status: resp.status,
         statusText: resp.statusText,
         headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
         body: respText
-      });*/
+      }); */
       ////////////////////////////////////////////////////////////
       if (!resp.ok) {
         const text = await resp.text().catch(() => '<unreadable>');
@@ -680,13 +685,13 @@ async function portfolioDetails(userId) {
       const cloned = resp.clone();
       const respText = await cloned.text().catch(() => '<unreadable>');
       const respJson = JSON.parse(respText);
-      console.log('portfolioDetails Upstream response:', {
+      /* console.log('portfolioDetails Upstream response:', {
         status: resp.status,
         statusText: resp.statusText,
         headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
         body: respText,
         data: JSON.stringify(respJson || {}),
-      });
+      }); */
       ////////////////////////////////////////////////////////////
       if (!resp.ok) {
         const text = await resp.text().catch(() => '<unreadable>');

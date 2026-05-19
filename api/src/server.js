@@ -82,8 +82,41 @@ function clearUserData(userId) {
     userPortfolios.delete(userId);
     userPaperTradeGroups.delete(userId);
     userAccessTokens.delete(userId);
+    pendingOrders.delete(userId);
     console.log(`Cleared all data for user ${userId}`);
   }
+}
+
+// Helper functions for managing pending orders
+function setPendingOrder(userId, symbol, action) {
+  if (userId && symbol && action) {
+    const orderKey = `${symbol}_${action}`;
+    if (!pendingOrders.has(userId)) {
+      pendingOrders.set(userId, new Set());
+    }
+    pendingOrders.get(userId).add(orderKey);
+    console.log(`Pending order added for user ${userId}: ${orderKey}`);
+  }
+}
+
+function removePendingOrder(userId, symbol, action) {
+  if (userId && symbol && action) {
+    const orderKey = `${symbol}_${action}`;
+    if (pendingOrders.has(userId)) {
+      pendingOrders.get(userId).delete(orderKey);
+      console.log(`Pending order removed for user ${userId}: ${orderKey}`);
+    }
+  }
+}
+
+function getPendingOrders(userId) {
+  return userId && pendingOrders.has(userId) ? pendingOrders.get(userId) : new Set();
+}
+
+function hasPendingOrder(userId, symbol, action) {
+  if (!userId || !symbol || !action) return false;
+  const orderKey = `${symbol}_${action}`;
+  return pendingOrders.has(userId) && pendingOrders.get(userId).has(orderKey);
 }
 
 // Extract userId from request header (X-User-Id)
@@ -544,16 +577,25 @@ setInterval(async () => {
         );
 
         if (shouldExit) {
+          const exitType = position.quantity < 0 ? "BUY" : "SELL";
+          const orderKey = `${position.symbol}_${exitType}`;
+
+          // Check if order is already pending
+          if (hasPendingOrder(userId, position.symbol, exitType)) {
+            console.log(`Order already pending for ${position.symbol} (${exitType}), skipping...`);
+            continue;
+          }
+
           console.log(`Auto-exit triggered for ${position.symbol}: LTP=${position.ltp}, SL=${position.stop_loss} at time:${istTime}`);
           // console.log(`Position details:`, JSON.stringify(position)); // <-- debug log
 
-          const exitType = position.quantity < 0 ? "BUY" : "SELL";
           const exitQuantity = Math.abs(position.quantity);
 
           const ret = await createOrderPayload(userId, exitType, position.symbol, exitQuantity, position.ltp);
 
           if (ret.status) {
             console.log(`Successfully auto-exited ${position.symbol}`);
+            setPendingOrder(userId, position.symbol, exitType);
           } else {
             console.error(`Failed to auto-exit ${position.symbol}:`, ret.error);
           }

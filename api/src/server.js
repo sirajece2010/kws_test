@@ -596,7 +596,6 @@ setInterval(async () => {
       ]);
       if (!portfolioData) continue;
 
-      console.log('Running auto-exit monitor at', new Date().toISOString());
       const transformedRows = transformPortfolioResponse(portfolioData);
       const combined = await enrichPortfolioWithInstruments(transformedRows);
 
@@ -612,6 +611,10 @@ setInterval(async () => {
         }).format(new Date());
         const [h, m] = istTime.split(':').map(Number);
         const afterCutoff = (h * 60 + m) > (10 * 60 + 20) && (h * 60 + m) < (15 * 60 + 10); // after 10:20 AM and before 3:10 PM
+
+        if (afterCutoff) {
+          console.log('Running auto-exit monitor at', new Date().toISOString());
+        }
 
         const shouldExit = afterCutoff && (
           position.quantity < 0 

@@ -9,9 +9,12 @@ const newStrike = document.getElementById('new-strike');
 const newQuantity = document.getElementById('new-quantity');
 const authBtn = document.getElementById('auth-btn');
 const getPortfolioBtn = document.getElementById('get-portfolio-btn');
-const portfolioSelect = document.getElementById('portfolio-select');
+//const portfolioSelect = document.getElementById('portfolio-select');
 const statusEl = document.getElementById('status');
 const toggleBtn = document.getElementById('theme-toggle');
+const obody = document.getElementById('obody');
+const refreshOrdersBtn = document.getElementById('refresh-orders-btn');
+const ordersStatusEl = document.getElementById('orders-status');
 
 const userSelect = document.getElementById('user-select');
 const switchUserBtn = document.getElementById('switch-user-btn');
@@ -369,5 +372,56 @@ function initSubtabs() {
 
 initPrimaryNavigation();
 initSubtabs();
+
+// Load orders when the Orders subtab is clicked
+document.querySelector('[data-subtab-target="inventory-orders"]')?.addEventListener('click', () => {
+  loadOrders();
+});
+
+// Refresh portfolio data when Inventory Positions subtab is clicked
+document.querySelector('[data-subtab-target="inventory-positions"]')?.addEventListener('click', () => {
+  refresh();
+});
+
+refreshOrdersBtn?.addEventListener('click', () => loadOrders());
+
+async function loadOrders() {
+  try {
+    ordersStatusEl.textContent = 'Loading...';
+    ordersStatusEl.className = 'muted';
+    const res = await getJSON(`${API}/orders`);
+    const orders = Array.isArray(res) ? res : (res.orders || []);
+    obody.innerHTML = '';
+    if (orders.length === 0) {
+      const tr = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 9;
+      cell.textContent = 'No orders found.';
+      cell.style.textAlign = 'center';
+      tr.appendChild(cell);
+      obody.appendChild(tr);
+    } else {
+      orders.forEach(o => {
+        const tr = document.createElement('tr');
+        tr.appendChild(td(o.order_timestamp));
+        tr.appendChild(td(o.trading_symbol || o.symbol || '—'));
+        tr.appendChild(td(o.transaction_type || o.type || '—'));
+        tr.appendChild(td(o.strike || '—'));
+        tr.appendChild(td(o.quantity || '—'));
+        tr.appendChild(td(o.price || '—'));
+        tr.appendChild(td(o.placed_by || '—'));
+        tr.appendChild(td(o.status || '—'));
+        tr.appendChild(td(o.sensibull_order_state || '—'));
+        obody.appendChild(tr);
+      });
+    }
+    ordersStatusEl.textContent = `${orders.length} order(s) loaded.`;
+    ordersStatusEl.className = 'success';
+    setTimeout(() => { ordersStatusEl.textContent = ''; ordersStatusEl.className = ''; }, 3000);
+  } catch (e) {
+    ordersStatusEl.textContent = parseError(e);
+    ordersStatusEl.className = 'error';
+  }
+}
 
 refresh().catch(err => setStatus(parseError(err), true));

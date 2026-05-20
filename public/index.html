@@ -104,9 +104,27 @@
     </div>
 
     <div class="subtab-panel" id="inventory-orders">
-      <div class="dummy-card">
-        <h2>Orders (Dummy)</h2>
-        <p>Recent orders, pending actions, and execution logs can be displayed here.</p>
+      <div class="order-card">
+        <div class="controls">
+          <button id="refresh-orders-btn">Refresh Orders</button>
+          <span id="orders-status" class="muted"></span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Symbol</th>
+              <th>Type</th>
+              <th>Strike</th>
+              <th>Quantity</th>
+              <th>Price</th>
+              <th>who</th>
+              <th>Status</th>
+              <th>Sensibull Order State</th>
+            </tr>
+          </thead>
+        <tbody id="obody"></tbody>
+      </table>
       </div>
     </div>
   </section>

@@ -88,35 +88,58 @@ function clearUserData(userId) {
 }
 
 // Helper functions for managing pending orders
-function setPendingOrder(userId, symbol, action) {
-  if (userId && symbol && action) {
-    const orderKey = `${symbol}_${action}`;
-    if (!pendingOrders.has(userId)) {
-      pendingOrders.set(userId, new Set());
-    }
-    pendingOrders.get(userId).add(orderKey);
-    console.log(`Pending order added for user ${userId}: ${orderKey}`);
+function syncPendingOrders(userId, orders = []) {
+  if (!userId) return new Set();
+
+  const openOrderKeys = new Set(
+    orders
+      .filter((order) => String(order.status || '').toUpperCase() === 'OPEN')
+      .map((order) => {
+        const symbol = order.trading_symbol || order.symbol;
+        const action = order.transaction_type || order.type;
+        const quantity = order.quantity || order.qty;
+        return symbol && action && quantity ? `${symbol}_${action}_${quantity}` : null;
+      })
+      .filter(Boolean)
+  );
+  // console.log(`User ${userId} - Synced pending orders:`, Array.from(openOrderKeys)); // <-- add this for debug
+  if (openOrderKeys.size > 0) {
+    pendingOrders.set(userId, openOrderKeys);
+  } else {
+    pendingOrders.delete(userId);
   }
+
+  return openOrderKeys;
 }
 
-function removePendingOrder(userId, symbol, action) {
-  if (userId && symbol && action) {
-    const orderKey = `${symbol}_${action}`;
-    if (pendingOrders.has(userId)) {
-      pendingOrders.get(userId).delete(orderKey);
-      console.log(`Pending order removed for user ${userId}: ${orderKey}`);
-    }
-  }
+async function getPendingOrders(userId) {
+  if (!userId) return new Set();
+
+  const result = await Ordersmap(userId);
+  return syncPendingOrders(userId, result?.orders || []);
 }
 
-function getPendingOrders(userId) {
-  return userId && pendingOrders.has(userId) ? pendingOrders.get(userId) : new Set();
-}
-
-function hasPendingOrder(userId, symbol, action) {
+function hasPendingOrder(userId, symbol, action, quantity) {
   if (!userId || !symbol || !action) return false;
-  const orderKey = `${symbol}_${action}`;
-  return pendingOrders.has(userId) && pendingOrders.get(userId).has(orderKey);
+
+  const userPendingOrders = pendingOrders.get(userId);
+  if (!userPendingOrders || userPendingOrders.size === 0) return false;
+
+  // Exact match when quantity is available.
+  if (quantity !== undefined && quantity !== null) {
+    const orderKey = `${symbol}_${action}_${quantity}`;
+    return userPendingOrders.has(orderKey);
+  }
+
+  // Fallback: match any open order for same symbol + action from syncPendingOrders.
+  const keyPrefix = `${symbol}_${action}_`;
+  for (const key of userPendingOrders) {
+    if (key.startsWith(keyPrefix)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // Extract userId from request header (X-User-Id)
@@ -204,6 +227,20 @@ app.post('/api/authenticate', async (req, res, next) => {
     }
     console.log(`Authentication successful for user ${isValid.user_id}`);
     res.json({ 'code': code, 'user': isValid.user_id, 'message': `${isValid.user_id} authentication successful. Access token is set.` });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/orders', async (req, res, next) => {
+  try {
+    // const userId = getRequestUserId(req);
+    const userId = getRequestUserId(req) || 'UVP969'; // <-- use default_user if userId is missing for testing
+    if (!userId) {
+      return res.status(400).json({ error: 'X-User-Id header is required' });
+    }
+    const orders = await Ordersmap(userId);
+    res.json(orders);
   } catch (err) {
     next(err);
   }
@@ -548,12 +585,18 @@ app.delete('/api/devices/:id', async (req, res, next) => {
 // Auto-exit monitor for stop-loss
 setInterval(async () => {
   try {
-    return; // <-- disable auto-exit for now
+    // return; // <-- disable auto-exit for now
     // Iterate through all users and check their portfolios
     for (const [userId, portfolioId] of userPortfolios.entries()) {
-      const { portfolioData } = await portfolioDetails(userId);
+      // Refresh portfolio and pending orders in parallel. pendingOrdersmap() updates
+      // pendingOrders to only OPEN statuses, which removes CANCELLED/REJECTED keys.
+      const [{ portfolioData }] = await Promise.all([
+        portfolioDetails(userId),
+        Ordersmap(userId)
+      ]);
       if (!portfolioData) continue;
 
+      console.log('Running auto-exit monitor at', new Date().toISOString());
       const transformedRows = transformPortfolioResponse(portfolioData);
       const combined = await enrichPortfolioWithInstruments(transformedRows);
 
@@ -578,26 +621,28 @@ setInterval(async () => {
 
         if (shouldExit) {
           const exitType = position.quantity < 0 ? "BUY" : "SELL";
-          const orderKey = `${position.symbol}_${exitType}`;
+          const exitQuantity = Math.abs(position.quantity);
 
           // Check if order is already pending
-          if (hasPendingOrder(userId, position.symbol, exitType)) {
-            console.log(`Order already pending for ${position.symbol} (${exitType}), skipping...`);
+          if (hasPendingOrder(userId, position.symbol, exitType, exitQuantity)) {
+            console.log(`Order already pending for ${position.symbol} (${exitType}, qty=${exitQuantity}), skipping...`);
             continue;
           }
 
           console.log(`Auto-exit triggered for ${position.symbol}: LTP=${position.ltp}, SL=${position.stop_loss} at time:${istTime}`);
           // console.log(`Position details:`, JSON.stringify(position)); // <-- debug log
 
-          const exitQuantity = Math.abs(position.quantity);
+          try {
+            const ret = await createOrderPayload(userId, exitType, position.symbol, exitQuantity, position.ltp);
 
-          const ret = await createOrderPayload(userId, exitType, position.symbol, exitQuantity, position.ltp);
-
-          if (ret.status) {
-            console.log(`Successfully auto-exited ${position.symbol}`);
-            setPendingOrder(userId, position.symbol, exitType);
-          } else {
-            console.error(`Failed to auto-exit ${position.symbol}:`, ret.error);
+            if (ret && ret.status) {
+              console.log(`Successfully auto-exited ${position.symbol}`);
+              await getPendingOrders(userId); // refresh with upstream OPEN orders
+            } else {
+              console.error(`Failed to auto-exit ${position.symbol}:`, ret?.error);
+            }
+          } catch (placeErr) {
+            console.error(`Auto-exit place order exception for ${position.symbol}:`, placeErr);
           }
         }
       }
@@ -706,6 +751,47 @@ async function createBasket(userId, trades) {
       return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
     }
 
+}
+
+async function Ordersmap(userId) {
+  // Implementation here
+  const accessToken = getUserAccessToken(userId);
+  const Url = 'https://oxide.sensibull.com/v1/compute/1/broker_data/user_orders?fno=true&equities=false&holdings=false'; // <-- real trading endpoint
+  if (!accessToken) {
+    console.log(`No access token found for user ${userId}`);
+    return { orders: [] };
+  }
+
+  try {
+    const resp = await fetch(Url, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+    });
+    ////////////////////// Debugging info //////////////////////
+    const cloned = resp.clone();
+    const respText = await cloned.text().catch(() => '<unreadable>');
+    const respJson = JSON.parse(respText);
+    /* console.log('pendingOrders Upstream response:', {
+      status: resp.status,
+      statusText: resp.statusText,
+      headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
+      body: respText,
+      data: JSON.stringify(respJson || {}),
+    }); */
+    ////////////////////////////////////////////////////////////
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '<unreadable>');
+      console.log(JSON.stringify({ error: resp.statusText, details: text }));
+      return { orders: [] };
+    }
+    const orders = respJson.payload.orders || [];
+    syncPendingOrders(userId, orders);
+    
+    return { orders };
+  } catch (e) {
+    console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+    return { orders: [] };
+  }
 }
 
 async function portfolioDetails(userId) {

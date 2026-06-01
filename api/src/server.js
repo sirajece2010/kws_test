@@ -42,6 +42,8 @@ const userPaperTradeGroups = new Map();     // userId -> paperTradeGroupId
 const userAccessTokens = new Map();         // userId -> accessToken
 const pendingOrders = new Map();            // userId -> Set of pending order keys (symbol_action)
 const instrumentsMap = {};                  // tradingsymbol -> instrument info
+let SELL_SL_PERCENT = 1.5;                  // Stop Loss percentage for SELL positions (150% of avg price)
+let BUY_SL_PERCENT = 0.33;                  // Stop Loss percentage for BUY positions (33% of avg price)
 
 
 // Helper functions for per-user state management
@@ -888,7 +890,7 @@ function transformPortfolioResponse(apiResponse) {
       booked: Math.round(Number(pos.booked_profit_loss) || 0),
       unbooked: Math.round(unbookedPnl),
       total: Math.round(Number(pos.total_pnl) || 0),
-      stop_loss: quantity < 0 ? Math.round(avgPrice * 1.5 * 20) / 20 : Math.round(avgPrice * 0.33 * 20) / 20
+      stop_loss: quantity < 0 ? Math.round(avgPrice * SELL_SL_PERCENT * 20) / 20 : Math.round(avgPrice * BUY_SL_PERCENT * 20) / 20
     };
   });
 }

@@ -8,7 +8,7 @@ const newSerial = document.getElementById('new-serial');
 const newStrike = document.getElementById('new-strike');
 const newQuantity = document.getElementById('new-quantity');
 const authBtn = document.getElementById('auth-btn');
-const getPortfolioBtn = document.getElementById('get-portfolio-btn');
+//const getPortfolioBtn = document.getElementById('get-portfolio-btn');
 //const portfolioSelect = document.getElementById('portfolio-select');
 const statusEl = document.getElementById('status');
 const toggleBtn = document.getElementById('theme-toggle');
@@ -44,14 +44,16 @@ function getAccessToken(username) {
   return accessTokens[username] || null;
 }
 
-/*switchUserBtn.addEventListener('click', async () => {
+switchUserBtn.addEventListener('click', async () => {
   const username = userSelect.value.trim();
   if (!username) return setStatus('Please select a user', true);
+  if (!getAccessToken(username)) {
+    return setStatus(`No saved session for ${username}. Please authenticate first.`, true);
+  }
   setCurrentUser(username);
-  getPortfolioBtn.click(); // Refresh portfolio for new user
   await refresh();
   setStatus(`Switched to user: ${username}`, false);
-});*/
+});
 
 let devices = [];
 
@@ -72,6 +74,7 @@ authBtn.addEventListener('click', async () => {
     }
 
     const res = await postJSON(`${API}/authenticate`, { secretkey: secretKey });
+    saveAccessToken(res.user, secretKey.trim());
     setCurrentUser(res.user);
     switchUserBtn.click();
     setStatus(`${res.message}`, false);

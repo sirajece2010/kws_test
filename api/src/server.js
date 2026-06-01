@@ -166,6 +166,18 @@ function getRequestToken(req) {
   return token;
 }
 
+// Middleware: restore per-user access token from Authorization header if not in memory.
+// This allows switching between authenticated users without requiring re-authentication
+// even after a server restart, as long as the client sends the stored Bearer token.
+app.use((req, _res, next) => {
+  const userId = getRequestUserId(req);
+  const token = getRequestToken(req);
+  if (userId && token && !getUserAccessToken(userId)) {
+    setUserAccessToken(userId, token);
+  }
+  next();
+});
+
 // Health check
 app.get('/api/health', async (_req, res) => {
   try {
@@ -175,6 +187,7 @@ app.get('/api/health', async (_req, res) => {
     res.status(500).json({ status: 'error', message: e.message });
   }
 });
+
 
 app.post('/api/authenticate', async (req, res, next) => {
   try {
@@ -613,7 +626,7 @@ setInterval(async () => {
         const afterCutoff = (h * 60 + m) > (10 * 60 + 20) && (h * 60 + m) < (15 * 60 + 10); // after 10:20 AM and before 3:10 PM
 
         if (afterCutoff) {
-          console.log('Running auto-exit monitor at', new Date().toISOString());
+          console.log('Running auto-exit monitor at', istTime.toISOString());
         }
 
         const shouldExit = afterCutoff && (

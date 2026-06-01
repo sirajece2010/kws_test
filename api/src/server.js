@@ -628,7 +628,7 @@ setInterval(async () => {
         const afterCutoff = (h * 60 + m) > (10 * 60 + 20) && (h * 60 + m) < (15 * 60 + 10); // after 10:20 AM and before 3:10 PM
 
         if (afterCutoff) {
-          console.log('Running auto-exit monitor at', istTime.toISOString());
+          console.log('Running auto-exit monitor at', istTime);
         }
 
         const shouldExit = afterCutoff && (

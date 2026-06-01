@@ -15,6 +15,9 @@ const toggleBtn = document.getElementById('theme-toggle');
 const obody = document.getElementById('obody');
 const refreshOrdersBtn = document.getElementById('refresh-orders-btn');
 const ordersStatusEl = document.getElementById('orders-status');
+const sellSlInput = document.getElementById('sell-sl-input');
+const saveSellSlBtn = document.getElementById('save-sell-sl-btn');
+const sellSlStatusEl = document.getElementById('sell-sl-status');
 
 const userSelect = document.getElementById('user-select');
 const switchUserBtn = document.getElementById('switch-user-btn');
@@ -312,6 +315,50 @@ function parseError(e) {
   }
 }
 
+async function loadSellSLPercent() {
+  if (!sellSlInput) return;
+  try {
+    const res = await getJSON(`${API}/settings/sell-sl-percent`);
+    if (typeof res.sellSlPercent === 'number') {
+      sellSlInput.value = String(res.sellSlPercent);
+    }
+  } catch (e) {
+    if (sellSlStatusEl) {
+      sellSlStatusEl.textContent = `Failed to load SELL SL: ${parseError(e)}`;
+      sellSlStatusEl.className = 'error';
+    }
+  }
+}
+
+saveSellSlBtn?.addEventListener('click', async () => {
+  try {
+    const nextValue = Number(sellSlInput?.value);
+    if (Number.isNaN(nextValue) || nextValue < 1 || nextValue > 2) {
+      if (sellSlStatusEl) {
+        sellSlStatusEl.textContent = 'SELL SL must be between 1 and 2';
+        sellSlStatusEl.className = 'error';
+      }
+      return;
+    }
+
+    const res = await putJSON(`${API}/settings/sell-sl-percent`, {
+      sellSlPercent: nextValue
+    });
+
+    if (sellSlStatusEl) {
+      sellSlStatusEl.textContent = `SELL SL updated to ${res.sellSlPercent}`;
+      sellSlStatusEl.className = 'success';
+    }
+
+    await refresh();
+  } catch (e) {
+    if (sellSlStatusEl) {
+      sellSlStatusEl.textContent = parseError(e);
+      sellSlStatusEl.className = 'error';
+    }
+  }
+});
+
 // --- navigation and subtabs ---
 function initPrimaryNavigation() {
   const navLinks = Array.from(document.querySelectorAll('.dummy-nav a[data-tab-target]'));
@@ -428,3 +475,9 @@ async function loadOrders() {
 }
 
 refresh().catch(err => setStatus(parseError(err), true));
+loadSellSLPercent().catch(err => {
+  if (sellSlStatusEl) {
+    sellSlStatusEl.textContent = parseError(err);
+    sellSlStatusEl.className = 'error';
+  }
+});

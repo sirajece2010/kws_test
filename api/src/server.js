@@ -190,6 +190,20 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
+app.get('/api/settings/sell-sl-percent', (_req, res) => {
+  res.json({ sellSlPercent: SELL_SL_PERCENT, min: 1, max: 2 });
+});
+
+app.put('/api/settings/sell-sl-percent', (req, res) => {
+  const value = Number(req.body?.sellSlPercent);
+  if (Number.isNaN(value) || value < 1 || value > 2) {
+    return res.status(400).json({ error: 'sellSlPercent must be between 1 and 2' });
+  }
+
+  SELL_SL_PERCENT = Math.round(value * 100) / 100;
+  return res.json({ sellSlPercent: SELL_SL_PERCENT });
+});
+
 
 app.post('/api/authenticate', async (req, res, next) => {
   try {

@@ -32,6 +32,54 @@
     .error { color: #c62828; margin-top: 8px; }
     .success { color: #2e7d32; margin-top: 8px; }
     .muted { color: #555; font-size: 12px; }
+    .help-tooltip { position: relative; display: inline-flex; align-items: center; }
+    .help-tooltip .info-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1px solid #bca1a1;
+      background: #fff;
+      color: #7a3f3f;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: default;
+      user-select: none;
+    }
+    .help-tooltip .tooltip-text {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: calc(100% + 8px);
+      background: #2f1d1d;
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      max-width: min(320px, calc(100vw - 24px));
+      white-space: normal;
+      overflow-wrap: break-word;
+      font-size: 12px;
+      line-height: 1.2;
+      visibility: hidden;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      pointer-events: none;
+      z-index: 2000;
+    }
+    .help-tooltip:hover .tooltip-text,
+    .help-tooltip:focus-within .tooltip-text {
+      visibility: visible;
+      opacity: 1;
+    }
+    @media (max-width: 2000px) {
+      .help-tooltip .tooltip-text {
+        left: auto;
+        right: auto;
+        transform: none;
+      }
+    }
     .user-label { position: fixed; top: 16px; right: 16px; font-size: 14px; font-weight: 600; background: #c68e8e; color: #fff; padding: 6px 14px; border-radius: 20px; z-index: 1000; }
   </style>
 </head>
@@ -178,14 +226,23 @@
     </div>
 
     <div class="subtab-panel active" id="settings-general">
-      <div class="dummy-card">
-        <h2>Settings (Dummy)</h2>
-        <p>Execution mode, lot sizing, and preferences can go here.</p>
+      <div class="settings-card">
+        <h2>Settings</h2>
+        <div class="controls">
+          <label for="sell-sl-input">SELL SL %</label>
+          <span class="help-tooltip" aria-label="SELL SL help">
+            <span class="info-icon" aria-hidden="true">i</span>
+            <span class="tooltip-text">Set SELL stop-loss multiplier between 1 and 2 (example: 1.50)</span>
+          </span>
+          <input id="sell-sl-input" type="number" min="1" max="2" step="0.01" placeholder="1.50" />
+          <button id="save-sell-sl-btn" type="button">Save SELL SL</button>
+          <span id="sell-sl-status" class="muted"></span>
+        </div>
       </div>
     </div>
 
     <div class="subtab-panel" id="settings-alerts">
-      <div class="dummy-card">
+      <div class="settings-card">
         <h2>Alert Rules (Dummy)</h2>
         <p>Thresholds, notifications, and exception policies can go here.</p>
       </div>

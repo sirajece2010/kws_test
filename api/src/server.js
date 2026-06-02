@@ -35,6 +35,7 @@ console.log('Serving static from:', publicDirResolved); // <-- add this for debu
 app.use(express.static(publicDirResolved));
 
 await init();
+await downloadInstrumentsCSV(); // Download instruments CSV once at startup
 
 // Per-user state storage (Maps indexed by userId/username)
 const userPortfolios = new Map();           // userId -> portfolioId
@@ -44,7 +45,6 @@ const pendingOrders = new Map();            // userId -> Set of pending order ke
 const instrumentsMap = {};                  // tradingsymbol -> instrument info
 let SELL_SL_PERCENT = 1.5;                  // Stop Loss percentage for SELL positions (150% of avg price)
 let BUY_SL_PERCENT = 0.33;                  // Stop Loss percentage for BUY positions (33% of avg price)
-
 
 // Helper functions for per-user state management
 function setUserPortfolio(userId, portfolioId) {
@@ -507,7 +507,6 @@ app.put('/api/devices/:id/chsl', async (req, res, next) => {
 // list portfolio
 app.get('/api/portfolio', async (req, res, next) => {
   try {
-    await downloadInstrumentsCSV(); // <-- download instrument info CSV
     const userId = getRequestUserId(req);
     if (!userId) {
       return res.status(401).json({ error: 'X-User-Id header is required' });
@@ -520,8 +519,12 @@ app.get('/api/portfolio', async (req, res, next) => {
   // fetch portfolio details after ensuring portfolioId is set
   try {
     const userId = getRequestUserId(req);
-    var portfolioId = Buffer.from(`${userId}:${portfolioId}`).toString('base64');
-    setUserPortfolio(userId, portfolioId);
+    //var portfolioId = Buffer.from(`${acc_tok}`).toString('base64');
+    var acc_tok = getRequestToken(req);
+    if (acc_tok) {
+      var portfolioId = `${acc_tok}`;
+      setUserPortfolio(userId, portfolioId);
+    }
     const { portfolioData } = await portfolioDetails(userId);
     if (!portfolioData) {
       return res.status(304).json({ error: 'No portfolio data.. Please select the portfolio' });

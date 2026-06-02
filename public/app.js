@@ -23,6 +23,24 @@ const userSelect = document.getElementById('user-select');
 const switchUserBtn = document.getElementById('switch-user-btn');
 let currentUser = localStorage.getItem('currentUser') || null;
 let accessTokens = JSON.parse(localStorage.getItem('accessTokens')) || {};
+// let accessTokens = {};
+
+// Clear accessTokens daily (Asia/Kolkata timezone)
+(function () {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+  const lastClearDate = localStorage.getItem('lastAccessTokensClearDate');
+  
+  if (lastClearDate !== today) {
+    localStorage.removeItem('accessTokens');
+    localStorage.setItem('lastAccessTokensClearDate', today);
+    console.log('Cleared accessTokens for new day (IST):', today);
+  }
+})();
 
 // Initialise username label from persisted session
 (function () {
@@ -55,6 +73,7 @@ switchUserBtn.addEventListener('click', async () => {
   }
   setCurrentUser(username);
   await refresh();
+  await loadOrders();
   setStatus(`Switched to user: ${username}`, false);
 });
 

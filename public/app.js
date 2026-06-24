@@ -22,25 +22,6 @@ const sellSlStatusEl = document.getElementById('sell-sl-status');
 const userSelect = document.getElementById('user-select');
 const switchUserBtn = document.getElementById('switch-user-btn');
 let currentUser = localStorage.getItem('currentUser') || null;
-let accessTokens = JSON.parse(localStorage.getItem('accessTokens')) || {};
-// let accessTokens = {};
-
-// Clear accessTokens daily (Asia/Kolkata timezone)
-(function () {
-  const today = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(new Date());
-  const lastClearDate = localStorage.getItem('lastAccessTokensClearDate');
-  
-  if (lastClearDate !== today) {
-    localStorage.removeItem('accessTokens');
-    localStorage.setItem('lastAccessTokensClearDate', today);
-    console.log('Cleared accessTokens for new day (IST):', today);
-  }
-})();
 
 // Initialise username label from persisted session
 (function () {
@@ -56,25 +37,20 @@ function setCurrentUser(username) {
   if (label) label.textContent = username || 'Guest';
 }
 
-function saveAccessToken(username, token) {
-  accessTokens[username] = token;
-  localStorage.setItem('accessTokens', JSON.stringify(accessTokens));
-}
-
-function getAccessToken(username) {
-  return accessTokens[username] || null;
-}
-
 switchUserBtn.addEventListener('click', async () => {
   const username = userSelect.value.trim();
   if (!username) return setStatus('Please select a user', true);
-  if (!getAccessToken(username)) {
-    return setStatus(`No saved session for ${username}. Please authenticate first.`, true);
-  }
   setCurrentUser(username);
-  await refresh();
-  await loadOrders();
-  setStatus(`Switched to user: ${username}`, false);
+  // Clear stale device details immediately; only repopulate if the new user has a valid access token
+  devices = [];
+  render();
+  try {
+    await refresh();
+    await loadOrders();
+    setStatus(`Switched to user: ${username}`, false);
+  } catch (e) {
+    setStatus(`Cannot switch to ${username}: ${parseError(e)}`, true);
+  }
 });
 
 let devices = [];
@@ -95,12 +71,12 @@ authBtn.addEventListener('click', async () => {
       return;
     }
 
-    const res = await postJSON(`${API}/authenticate`, { secretkey: secretKey });
-    saveAccessToken(res.user, secretKey.trim());
+    setCurrentUser(selectedUser);
+    const res = await postJSON(`${API}/authenticate`, { secretkey: secretKey, userId: selectedUser });
     setCurrentUser(res.user);
-    switchUserBtn.click();
-    setStatus(`${res.message}`, false);
     await refresh();
+    await loadOrders();
+    setStatus(`${res.message}`, false);
   } catch (e) {
     setStatus(parseError(e), true);
   }
@@ -153,6 +129,8 @@ async function refresh() {
     //setStatus(`Sync result: ${JSON.stringify(result)}`, false);
     render();
   } catch (e) {
+    devices = [];
+    render();
     setStatus(parseError(e), true);
   }
 }
@@ -164,103 +142,114 @@ function render() {
     : devices.filter(d => (d.symbol + ' ' + d.token).toLowerCase().includes(q));
 
   tbody.innerHTML = '';
-  rows.forEach(d => {
+  if (rows.length === 0) {
     const tr = document.createElement('tr');
-    //const isDark = document.documentElement.classList.contains('theme-dark');
-    const isDark = document.documentElement.classList.contains('theme-dark') ? true : false;
-    console.log('isDark:', isDark);
-    //tr.style.backgroundColor = d.unbooked > 0 ? '#58fa65ff' : d.unbooked < 0 ? '#f72f4dff' : '#ffffff';
-    tr.style.backgroundColor = d.unbooked > 0 ? (isDark ? '#145214' : '#e8f5e9') : d.unbooked < 0 ? (isDark ? '#5c121f' : '#ffebee') : (isDark ? '#333333' : '#ffffff');
-
-    const ordertype = d.quantity === 0 ? '—' : (d.quantity > 0 ? 'BUY' : 'SELL');
-    tr.appendChild(td(d.id));
-    tr.appendChild(td(d.symbol));
-    tr.appendChild(td(d.token));
-    tr.appendChild(td(ordertype));
-
-    const statusTd = document.createElement('td');
-    const allocated = !!(d.quantity && d.quantity !== 0);
-    const hasstoploss = !!d.stop_loss;
-    const badge = document.createElement('span');
-    badge.className = `badge ${allocated ? 'allocated' : 'available'}`;
-    badge.textContent = allocated ? 'Open' : 'Closed';
-    statusTd.appendChild(badge);
-    tr.appendChild(statusTd);
-
-    tr.appendChild(td(d.strike|| '—'));
-    tr.appendChild(td(d.quantity|| '—'));
-    tr.appendChild(td(d.avg_price|| '0'));
-    tr.appendChild(td(Number(d.ltp).toFixed(2)|| '—'));
-    tr.appendChild(td(d.booked|| '0'));
-    tr.appendChild(td(d.unbooked|| '0'));
-    tr.appendChild(td(d.stop_loss|| '—'));
-    tr.appendChild(td(d.total ? d.total : (d.booked + d.unbooked)|| '0'));
-    tr.appendChild(td(d.expiry|| '—'));
-
-    const actionsTd = document.createElement('td');
-    actionsTd.className = 'actions';
-    const addBtn = document.createElement('button');
-    addBtn.textContent = 'Add';
-    addBtn.disabled = !allocated;
-    addBtn.onclick = async () => {
-      const losts = prompt('How many lots to add?', '1');
-      if (!losts || !losts.trim()) return;
-      try {
-        await postJSON(`${API}/devices/${d.id}/addmore`, { symbol: d.symbol, lots: losts.trim(), price: d.ltp, lot_size: d.lot_size, type: ordertype });
-        await refresh();
-        setStatus(`Create Order added ${losts.trim()} lots of ${d.symbol}`, false);
-      } catch (e) {
-        setStatus(parseError(e), true);
-      }
-    };
-
-    const exitBtn = document.createElement('button');
-    exitBtn.textContent = 'Exit';
-    exitBtn.disabled = !allocated;
-    exitBtn.onclick = async () => {
-      const price = prompt('Enter exit price:', d.ltp);
-      let OrderType = 'LIMIT';
-      if (!price || !price.trim()) return;
-      if (!confirm(`Exit ${d.symbol} at price ${price.trim()}?`)) return;
-      if ((d.ltp < price.trim() && ordertype === 'SELL') || (d.ltp > price.trim() && ordertype === 'BUY')) {
-        OrderType = 'SL';
-      }
-      try {
-        await postJSON(`${API}/devices/${d.id}/exit`, { symbol: d.symbol, quantity: d.quantity, price: Number(price), lot_size: d.lot_size, type: ordertype, ordertype: OrderType });
-        await refresh();
-        if (OrderType === 'SL') {
-          setStatus(`SL order created for ${d.symbol}`, false);
-        } else {
-          setStatus(`Exit order created for ${d.symbol}`, false);
-        }
-      } catch (e) {
-        setStatus(parseError(e), true);
-      }
-    };
-    const chownBtn = document.createElement('button');
-    chownBtn.textContent = 'Modify SL';
-    //chownBtn.disabled = !hasstoploss;
-    chownBtn.disabled = true;
-    chownBtn.onclick = async () => {
-        const stoploss = prompt('Enter the new Stop Loss value:');
-      if (!stoploss || !stoploss.trim()) return;
-      try {
-        await putJSON(`${API}/devices/${d.id}/chsl`, { stop_loss: Number(stoploss.trim()), symbol: d.symbol });
-        await refresh();
-        setStatus(`StopLoss Updated to ${stoploss.trim()}`, false);
-      } catch (e) {
-        setStatus(parseError(e), true);
-      }
-    };
-    
-
-    actionsTd.appendChild(addBtn);
-    actionsTd.appendChild(exitBtn);
-    actionsTd.appendChild(chownBtn);
-    tr.appendChild(actionsTd);
-
+    const cell = document.createElement('td');
+    cell.colSpan = 15;
+    cell.textContent = 'No data found.';
+    cell.style.textAlign = 'center';
+    tr.appendChild(cell);
     tbody.appendChild(tr);
-  });
+  }
+  else {
+    rows.forEach(d => {
+      const tr = document.createElement('tr');
+      //const isDark = document.documentElement.classList.contains('theme-dark');
+      const isDark = document.documentElement.classList.contains('theme-dark') ? true : false;
+      console.log('isDark:', isDark);
+      //tr.style.backgroundColor = d.unbooked > 0 ? '#58fa65ff' : d.unbooked < 0 ? '#f72f4dff' : '#ffffff';
+      tr.style.backgroundColor = d.unbooked > 0 ? (isDark ? '#145214' : '#e8f5e9') : d.unbooked < 0 ? (isDark ? '#5c121f' : '#ffebee') : (isDark ? '#333333' : '#ffffff');
+
+      const ordertype = d.quantity === 0 ? '—' : (d.quantity > 0 ? 'BUY' : 'SELL');
+      tr.appendChild(td(d.id));
+      tr.appendChild(td(d.symbol));
+      tr.appendChild(td(d.token));
+      tr.appendChild(td(ordertype));
+
+      const statusTd = document.createElement('td');
+      const allocated = !!(d.quantity && d.quantity !== 0);
+      const hasstoploss = !!d.stop_loss;
+      const badge = document.createElement('span');
+      badge.className = `badge ${allocated ? 'allocated' : 'available'}`;
+      badge.textContent = allocated ? 'Open' : 'Closed';
+      statusTd.appendChild(badge);
+      tr.appendChild(statusTd);
+
+      tr.appendChild(td(d.strike|| '—'));
+      tr.appendChild(td(d.quantity|| '—'));
+      tr.appendChild(td(d.avg_price|| '0'));
+      tr.appendChild(td(Number(d.ltp).toFixed(2)|| '—'));
+      tr.appendChild(td(d.booked|| '0'));
+      tr.appendChild(td(d.unbooked|| '0'));
+      tr.appendChild(td(d.stop_loss|| '—'));
+      tr.appendChild(td(d.total ? d.total : (d.booked + d.unbooked)|| '0'));
+      tr.appendChild(td(d.expiry|| '—'));
+
+      const actionsTd = document.createElement('td');
+      actionsTd.className = 'actions';
+      const addBtn = document.createElement('button');
+      addBtn.textContent = 'Add';
+      addBtn.disabled = !allocated;
+      addBtn.onclick = async () => {
+        const losts = prompt('How many lots to add?', '1');
+        if (!losts || !losts.trim()) return;
+        try {
+          await postJSON(`${API}/devices/${d.id}/addmore`, { symbol: d.symbol, lots: losts.trim(), price: d.ltp, lot_size: d.lot_size, type: ordertype });
+          await refresh();
+          setStatus(`Create Order added ${losts.trim()} lots of ${d.symbol}`, false);
+        } catch (e) {
+          setStatus(parseError(e), true);
+        }
+      };
+
+      const exitBtn = document.createElement('button');
+      exitBtn.textContent = 'Exit';
+      exitBtn.disabled = !allocated;
+      exitBtn.onclick = async () => {
+        const price = prompt('Enter exit price:', d.ltp);
+        let OrderType = 'LIMIT';
+        if (!price || !price.trim()) return;
+        if (!confirm(`Exit ${d.symbol} at price ${price.trim()}?`)) return;
+        if ((d.ltp < price.trim() && ordertype === 'SELL') || (d.ltp > price.trim() && ordertype === 'BUY')) {
+          OrderType = 'SL';
+        }
+        try {
+          await postJSON(`${API}/devices/${d.id}/exit`, { symbol: d.symbol, quantity: d.quantity, price: Number(price), lot_size: d.lot_size, type: ordertype, ordertype: OrderType });
+          await refresh();
+          if (OrderType === 'SL') {
+            setStatus(`SL order created for ${d.symbol}`, false);
+          } else {
+            setStatus(`Exit order created for ${d.symbol}`, false);
+          }
+        } catch (e) {
+          setStatus(parseError(e), true);
+        }
+      };
+      const chownBtn = document.createElement('button');
+      chownBtn.textContent = 'Modify SL';
+      //chownBtn.disabled = !hasstoploss;
+      chownBtn.disabled = true;
+      chownBtn.onclick = async () => {
+          const stoploss = prompt('Enter the new Stop Loss value:');
+        if (!stoploss || !stoploss.trim()) return;
+        try {
+          await putJSON(`${API}/devices/${d.id}/chsl`, { stop_loss: Number(stoploss.trim()), symbol: d.symbol });
+          await refresh();
+          setStatus(`StopLoss Updated to ${stoploss.trim()}`, false);
+        } catch (e) {
+          setStatus(parseError(e), true);
+        }
+      };
+      
+
+      actionsTd.appendChild(addBtn);
+      actionsTd.appendChild(exitBtn);
+      actionsTd.appendChild(chownBtn);
+      tr.appendChild(actionsTd);
+
+      tbody.appendChild(tr);
+    });
+  }
 }
 
 function td(text) {
@@ -270,23 +259,17 @@ function td(text) {
 }
 
 function authHeaders(baseHeaders = {}) {
-  const token = getAccessToken(currentUser);
-  const headers = {
+  return {
     ...baseHeaders,
     'X-User-Id': currentUser || ''
   };
-  
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  
-  return headers;
 }
 
 // --- helpers ---
 async function getJSON(url) {
   const res = await fetch(url, {
-    headers: authHeaders()
+    headers: authHeaders(),
+    credentials: 'include'
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -297,7 +280,8 @@ async function postJSON(url, body) {
     headers: authHeaders({
       'Content-Type': 'application/json'
     }),
-    body: JSON.stringify(body || {})
+    body: JSON.stringify(body || {}),
+    credentials: 'include'
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json().catch(() => ({})); // some endpoints return 204
@@ -308,7 +292,8 @@ async function putJSON(url, body) {
     headers: authHeaders({
       'Content-Type': 'application/json'
     }),
-    body: JSON.stringify(body || {})
+    body: JSON.stringify(body || {}),
+    credentials: 'include'
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json().catch(() => ({})); // handles empty response

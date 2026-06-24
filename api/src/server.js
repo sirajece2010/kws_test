@@ -6,10 +6,22 @@ import { fileURLToPath } from 'url';
 import { init, all, get, run } from './db.js';
 import OTPLib from 'otplib';
 import { runInThisContext } from 'vm';
+import session from 'express-session';
 
 const app = express();
 app.use(morgan('dev'));
 app.use(express.json());
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'kws-session-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000
+  }
+}));
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -144,8 +156,18 @@ function hasPendingOrder(userId, symbol, action, quantity) {
   return false;
 }
 
-// Extract userId from request header (X-User-Id)
+// Extract userId from request header (X-User-Id) or authenticated session
 function getRequestUserId(req) {
+  const headerUserId = req.headers['x-user-id'] || req.get('x-user-id') || '';
+
+  if (headerUserId && headerUserId !== 'null' && headerUserId !== 'undefined') {
+    return headerUserId;
+  }
+
+  if (req.session && req.session.userId) {
+    return req.session.userId;
+  }
+
   const userId = req.headers['x-user-id'] || req.get('x-user-id') || '';
 
   // Filter out invalid values
@@ -208,10 +230,10 @@ app.put('/api/settings/sell-sl-percent', (req, res) => {
 app.post('/api/authenticate', async (req, res, next) => {
   try {
     const { secretkey } = req.body;
-    const userId = getRequestUserId(req);
+    const userId = req.body?.userId || getRequestUserId(req);
 
     if (!userId) {
-      return res.status(400).json({ error: 'X-User-Id header is required' });
+      return res.status(400).json({ error: 'userId is required' });
     }
     if (typeof secretkey !== 'string' || !secretkey.trim()) {
       return res.status(400).json({ error: 'secretkey is required' });
@@ -254,8 +276,12 @@ app.post('/api/authenticate', async (req, res, next) => {
     if (!isValid.status) {
       return res.status(401).json({ error: 'Invalid access token.' });
     }
+
+    req.session.userId = isValid.user_id;
+    req.session.authenticatedAt = Date.now();
+
     console.log(`Authentication successful for user ${isValid.user_id}`);
-    res.json({ 'code': code, 'user': isValid.user_id, 'message': `${isValid.user_id} authentication successful. Access token is set.` });
+    res.json({ 'code': code, 'user': isValid.user_id, 'message': `${isValid.user_id} authentication successful. Session is set.` });
   } catch (err) {
     next(err);
   }
@@ -527,7 +553,7 @@ app.get('/api/portfolio', async (req, res, next) => {
     }
     const { portfolioData } = await portfolioDetails(userId);
     if (!portfolioData) {
-      return res.status(304).json({ error: 'No portfolio data.. Please select the portfolio' });
+      return res.status(200).json([]);
     }
     // console.log('portfolioData:', JSON.stringify(portfolioData)); // <-- debug log
     // console.log('instrumentData:', JSON.stringify(instrumentData)); // <-- debug log

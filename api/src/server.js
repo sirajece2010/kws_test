@@ -538,28 +538,19 @@ app.get('/api/portfolio', async (req, res, next) => {
       return res.status(401).json({ error: 'X-User-Id header is required' });
     }
 
-  }catch (err) {
-    next(err);
-  }
-
-  // fetch portfolio details after ensuring portfolioId is set
-  try {
-    const userId = getRequestUserId(req);
-    //var portfolioId = Buffer.from(`${acc_tok}`).toString('base64');
-    var acc_tok = getRequestToken(req);
+    // If a Bearer token is present, store it as the access token for this user
+    const acc_tok = getRequestToken(req);
     if (acc_tok) {
-      var portfolioId = `${acc_tok}`;
-      setUserPortfolio(userId, portfolioId);
+      setUserAccessToken(userId, acc_tok);
     }
+
     const { portfolioData } = await portfolioDetails(userId);
     if (!portfolioData) {
       return res.status(200).json([]);
     }
-    // console.log('portfolioData:', JSON.stringify(portfolioData)); // <-- debug log
-    // console.log('instrumentData:', JSON.stringify(instrumentData)); // <-- debug log
+
     const transformedRows = transformPortfolioResponse(portfolioData);
     const combined = await enrichPortfolioWithInstruments(transformedRows);
-    // console.log('combined:', JSON.stringify(combined)); // <-- debug log
     res.json(combined);
   } catch (err) {
     next(err);
@@ -645,7 +636,7 @@ setInterval(async () => {
   try {
     // return; // <-- disable auto-exit for now
     // Iterate through all users and check their portfolios
-    for (const [userId, portfolioId] of userPortfolios.entries()) {
+    for (const [userId] of userAccessTokens.entries()) {
       // Refresh portfolio and pending orders in parallel. pendingOrdersmap() updates
       // pendingOrders to only OPEN statuses, which removes CANCELLED/REJECTED keys.
       const [{ portfolioData }] = await Promise.all([

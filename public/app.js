@@ -337,9 +337,9 @@ async function loadSellSLPercent() {
 saveSellSlBtn?.addEventListener('click', async () => {
   try {
     const nextValue = Number(sellSlInput?.value);
-    if (Number.isNaN(nextValue) || nextValue < 1 || nextValue > 2) {
+    if (Number.isNaN(nextValue) || nextValue < 0.5 || nextValue > 2) {
       if (sellSlStatusEl) {
-        sellSlStatusEl.textContent = 'SELL SL must be between 1 and 2';
+        sellSlStatusEl.textContent = 'SELL SL must be between 0.5 and 2';
         sellSlStatusEl.className = 'error';
       }
       return;

@@ -7,6 +7,9 @@ import { init, all, get, run } from './db.js';
 import OTPLib from 'otplib';
 import { runInThisContext } from 'vm';
 import session from 'express-session';
+import https from 'https';
+import http from 'http';
+import fs from 'fs';
 
 const app = express();
 app.use(morgan('dev'));
@@ -18,7 +21,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: true, // always HTTPS
     maxAge: 24 * 60 * 60 * 1000
   }
 }));
@@ -30,7 +33,6 @@ const __dirname = path.dirname(__filename);
 const publicDir = path.resolve(__dirname, '../public');
 // Dynamic public directory resolution
 let publicDirResolved = publicDir;
-const fs = await import('fs');
 const possiblePaths = [
   publicDir,
   path.resolve(__dirname, '../../public'),
@@ -225,7 +227,6 @@ app.put('/api/settings/sell-sl-percent', (req, res) => {
   SELL_SL_PERCENT = Math.round(value * 100) / 100;
   return res.json({ sellSlPercent: SELL_SL_PERCENT });
 });
-
 
 app.post('/api/authenticate', async (req, res, next) => {
   try {
@@ -1104,7 +1105,23 @@ app.use((err, _req, res, _next) => {
 });
 
 // Start server
-const port = Number(3050);
-app.listen(port, () => {
-  console.log(`Device Inventory listening on http://localhost:${port}`);
+const httpsPort = Number(process.env.HTTPS_PORT || 3443);
+const httpPort  = Number(process.env.PORT || 3050);
+
+// HTTPS server
+const sslOptions = {
+  key:  fs.readFileSync(new URL('../key.pem',  import.meta.url)),
+  cert: fs.readFileSync(new URL('../cert.pem', import.meta.url)),
+};
+https.createServer(sslOptions, app).listen(httpsPort, () => {
+  console.log(`Device Inventory listening on https://localhost:${httpsPort}`);
+});
+
+// HTTP server — redirects all traffic to HTTPS
+http.createServer((req, res) => {
+  const host = (req.headers.host || `localhost:${httpsPort}`).replace(/:\d+$/, '');
+  res.writeHead(301, { Location: `https://${host}:${httpsPort}${req.url}` });
+  res.end();
+}).listen(httpPort, () => {
+  console.log(`HTTP on port ${httpPort} → redirecting to https://localhost:${httpsPort}`);
 });

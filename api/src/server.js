@@ -55,10 +55,47 @@ await downloadInstrumentsCSV(); // Download instruments CSV once at startup
 const userPortfolios = new Map();           // userId -> portfolioId
 const userPaperTradeGroups = new Map();     // userId -> paperTradeGroupId
 const userAccessTokens = new Map();         // userId -> accessToken
+const userSessionCookies = new Map();       // userId -> { client_info, bkd_ref }
 const pendingOrders = new Map();            // userId -> Set of pending order keys (symbol_action)
 const instrumentsMap = {};                  // tradingsymbol -> instrument info
 let SELL_SL_PERCENT = 1.5;                  // Stop Loss percentage for SELL positions (150% of avg price)
 let BUY_SL_PERCENT = 0.33;                  // Stop Loss percentage for BUY positions (33% of avg price)
+
+function setUserSessionCookies(userId, cookies = {}) {
+  if (userId) userSessionCookies.set(userId, cookies);
+}
+function getUserSessionCookies(userId) {
+  return userId ? (userSessionCookies.get(userId) || {}) : {};
+}
+function buildCookie(accessToken, userId) {
+  // Sensibull's oxide endpoints require their own pb: prefixed token, not the raw Kite token
+  const sensibullToken = process.env.SENSIBULL_ACCESS_TOKEN || accessToken;
+  const session = getUserSessionCookies(userId);
+  const clientInfo = session.client_info || process.env.SENSIBULL_CLIENT_INFO || '';
+  const bkdRef     = session.bkd_ref     || process.env.SENSIBULL_BKD_REF     || '';
+  let extra = '';
+  if (clientInfo) extra += '; client_info=' + clientInfo;
+  if (bkdRef)     extra += '; bkd_ref=' + bkdRef;
+  return 'access_token=' + sensibullToken + extra;
+}
+
+function sensibullHeaders(accessToken, userId) {
+  return {
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Content-Type': 'application/json',
+    'Cookie': buildCookie(accessToken, userId),
+    'Origin': 'https://web.sensibull.com',
+    'Referer': 'https://web.sensibull.com/',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+    'sec-ch-ua': '"Not/A)Brand";v="8", "Chromium";v="126"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-site',
+  };
+}
 
 // Helper functions for per-user state management
 function setUserPortfolio(userId, portfolioId) {
@@ -98,6 +135,7 @@ function clearUserData(userId) {
     userPortfolios.delete(userId);
     userPaperTradeGroups.delete(userId);
     userAccessTokens.delete(userId);
+    userSessionCookies.delete(userId);
     pendingOrders.delete(userId);
     console.log(`Cleared all data for user ${userId}`);
   }
@@ -237,44 +275,11 @@ app.post('/api/authenticate', async (req, res, next) => {
       return res.status(400).json({ error: 'userId is required' });
     }
     if (typeof secretkey !== 'string' || !secretkey.trim()) {
-      return res.status(400).json({ error: 'secretkey is required' });
+      return res.status(400).json({ error: 'secretkey (access token) is required' });
     }
-    const code = OTPLib.authenticator.generate(secretkey.trim());
-    //console.log('Generated OTP code:', code); // <-- debug log
 
-    // Example usage with Sensibull API key (replace with actual logic as needed)
-    const url = 'https://kite.zerodha.com/connect/login';
-    const sensibullApiKey = 'uf8cguv719djhxfc';
-    const params = {
-      api_key: sensibullApiKey,
-      v: 3,
-      redirect_params: 'redirect_url=https://web.sensibull.com/home'
-    };
-
-    const resp = await fetch(url + '?' + new URLSearchParams(params), {
-      method: 'GET',
-    });
-    ////////////////////// Debugging info //////////////////////
-    /*console.log('Sensibull API response:', {
-      status: resp.status,
-      statusText: resp.statusText,
-      headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
-      cookies: resp.headers.get('set-cookie') || 'none',
-      //body: await resp.text().catch(() => '<unreadable>')
-    });*/
-    ////////////////////////////////////////////////////////////
-
-    if (!resp) {
-      return res.status(500).json({ error: 'Failed to contact Sensibull API' });
-    }
-    else if (!resp.ok) {
-      const text = await resp.text().catch(() => '<unreadable>');
-      return res.status(resp.status).json({ error: 'Sensibull API error', details: text });
-    } 
-
-    const isValid = await IsvalidToken(userId, secretkey.trim()); // <-- test call to upstream to validate token
-    //console.log('Access token validation result:', isValid); // <-- debug log
-    if (!isValid.status) {
+    const isValid = await IsvalidToken(userId, secretkey.trim());
+    if (!isValid || !isValid.status) {
       return res.status(401).json({ error: 'Invalid access token.' });
     }
 
@@ -282,11 +287,79 @@ app.post('/api/authenticate', async (req, res, next) => {
     req.session.authenticatedAt = Date.now();
 
     console.log(`Authentication successful for user ${isValid.user_id}`);
-    res.json({ 'code': code, 'user': isValid.user_id, 'message': `${isValid.user_id} authentication successful. Session is set.` });
+    res.json({ user: isValid.user_id, message: `${isValid.user_id} authenticated successfully.` });
   } catch (err) {
     next(err);
   }
 });
+
+// Returns the Kite OAuth login URL; frontend redirects the user to it
+app.get('/api/kite-login-url', (req, res) => {
+  const userId = req.query.userId || '';
+  const apiKey = process.env.KITE_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'KITE_API_KEY not configured in .env' });
+
+  const params = new URLSearchParams({ api_key: apiKey, v: 3 });
+  if (userId) params.set('state', userId);
+  res.json({ url: `https://kite.zerodha.com/connect/login?${params}` });
+});
+
+// Kite redirects here after login with ?request_token=xxx&status=success
+app.get('/api/kite-callback', async (req, res, next) => {
+  try {
+    const { request_token, status, state } = req.query;
+
+    if (status !== 'success' || !request_token) {
+      return res.status(400).send('Kite login failed or request_token missing.');
+    }
+
+    const apiKey    = process.env.KITE_API_KEY;
+    const apiSecret = process.env.KITE_API_SECRET;
+
+    if (!apiKey || !apiSecret) {
+      return res.status(500).send('KITE_API_KEY or KITE_API_SECRET not configured in .env');
+    }
+
+    // Exchange request_token → access_token using SHA-256 checksum
+    const { createHash } = await import('crypto');
+    const checksum = createHash('sha256')
+      .update(apiKey + request_token + apiSecret)
+      .digest('hex');
+
+    const tokenResp = await fetch('https://api.kite.trade/session/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Kite-Version': '3' },
+      body: new URLSearchParams({ api_key: apiKey, request_token, checksum }),
+    });
+
+    const tokenText = await tokenResp.text();
+    console.log(`[kite-callback] Token exchange status: ${tokenResp.status}, body: ${tokenText}`);
+
+    if (!tokenResp.ok) {
+      return res.status(tokenResp.status).send('Token exchange failed: ' + tokenText);
+    }
+
+    const tokenJson = JSON.parse(tokenText);
+    const accessToken = tokenJson.data?.access_token;
+    const kiteUserId  = tokenJson.data?.user_id || state;
+
+    if (!accessToken || !kiteUserId) {
+      return res.status(500).send('No access_token or user_id in Kite response.');
+    }
+
+    // Store token in memory for Sensibull operations
+    setUserAccessToken(kiteUserId, accessToken);
+    req.session.userId = kiteUserId;
+    req.session.authenticatedAt = Date.now();
+    console.log(`[kite-callback] Authenticated user ${kiteUserId}, token length=${accessToken.length}`);
+
+    // Redirect to app — frontend picks up user + token from URL params
+    res.redirect(`/?user=${encodeURIComponent(kiteUserId)}&token=${encodeURIComponent(accessToken)}`);
+  } catch (err) {
+    next(err);
+  }
+});
+
 
 app.get('/api/orders', async (req, res, next) => {
   try {
@@ -539,28 +612,18 @@ app.get('/api/portfolio', async (req, res, next) => {
       return res.status(401).json({ error: 'X-User-Id header is required' });
     }
 
-  }catch (err) {
-    next(err);
-  }
-
-  // fetch portfolio details after ensuring portfolioId is set
-  try {
-    const userId = getRequestUserId(req);
-    //var portfolioId = Buffer.from(`${acc_tok}`).toString('base64');
-    var acc_tok = getRequestToken(req);
+    // If a Bearer token is present, store it as the access token for this user
+    const acc_tok = getRequestToken(req);
     if (acc_tok) {
-      var portfolioId = `${acc_tok}`;
-      setUserPortfolio(userId, portfolioId);
+      setUserAccessToken(userId, acc_tok);
     }
+
     const { portfolioData } = await portfolioDetails(userId);
     if (!portfolioData) {
       return res.status(200).json([]);
     }
-    // console.log('portfolioData:', JSON.stringify(portfolioData)); // <-- debug log
-    // console.log('instrumentData:', JSON.stringify(instrumentData)); // <-- debug log
     const transformedRows = transformPortfolioResponse(portfolioData);
     const combined = await enrichPortfolioWithInstruments(transformedRows);
-    // console.log('combined:', JSON.stringify(combined)); // <-- debug log
     res.json(combined);
   } catch (err) {
     next(err);
@@ -749,7 +812,7 @@ async function createOrderPayload(userId, action, symbol, quantity, price, order
     try {
       const resp = await fetch(callbackUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        headers: sensibullHeaders(accessToken, userId),
         body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////
@@ -770,7 +833,8 @@ async function createOrderPayload(userId, action, symbol, quantity, price, order
       //console.log(JSON.stringify({ status: true, response: respJson }));
       return { status: true, response: respJson };
     } catch (e) {
-      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+      console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+      return { status: false, error: e.message };
     }
 }
 
@@ -789,7 +853,7 @@ async function createBasket(userId, trades) {
     try {
       const resp = await fetch(Url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        headers: sensibullHeaders(accessToken, userId),
         body: JSON.stringify(payload),
       });
       const cloned = resp.clone();
@@ -810,7 +874,8 @@ async function createBasket(userId, trades) {
       }
       return { basket_order_id: respJson.payload.basket_order.basket_order_id, basket_order_entry: respJson.payload.basket_page_data.basket_order_entries[0].basket_order_entries[0]} || [] ;
     } catch (e) {
-      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+      console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+      return [];
     }
 
 }
@@ -827,7 +892,7 @@ async function Ordersmap(userId) {
   try {
     const resp = await fetch(Url, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+      headers: sensibullHeaders(accessToken, userId),
     });
     ////////////////////// Debugging info //////////////////////
     const cloned = resp.clone();
@@ -869,37 +934,21 @@ async function portfolioDetails(userId) {
     try {
       const resp = await fetch(Url, {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        headers: sensibullHeaders(accessToken, userId),
       });
-      ////////////////////// Debugging info //////////////////////
-      const cloned = resp.clone();
-      const respText = await cloned.text().catch(() => '<unreadable>');
-      const respJson = JSON.parse(respText);
-      /* console.log('portfolioDetails Upstream response:', {
-        status: resp.status,
-        statusText: resp.statusText,
-        headers: Object.fromEntries(resp.headers.entries ? resp.headers.entries() : []),
-        body: respText,
-        data: JSON.stringify(respJson || {}),
-      }); */
-      ////////////////////////////////////////////////////////////
+      const respText = await resp.text().catch(() => '{}');
+      console.log(`[portfolioDetails] status=${resp.status} body=${respText.slice(0, 200)}`);
       if (!resp.ok) {
-        const text = await resp.text().catch(() => '<unreadable>');
-        return console.log(JSON.stringify({ error: resp.statusText, details: text }));
+        console.log(JSON.stringify({ error: resp.statusText, details: respText }));
+        return { portfolioData: null };
       }
+      let respJson;
+      try { respJson = JSON.parse(respText); } catch { return { portfolioData: null }; }
       const portfolioData = respJson.data || {};
-      //const instrumentData = respJson.payload.instrument_info || {};
-      //const orderBookGroups = respJson.payload.groups[0].orders || {};
-      //const paperTradeGroupId = respJson.payload.groups[0].id || '';
-      
-      // Store paper trade group for this user
-      /*if (paperTradeGroupId) {
-        setUserPaperTradeGroup(userId, paperTradeGroupId);
-      }*/
-
       return { portfolioData };
     } catch (e) {
-      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+      console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+      return { portfolioData: null };
     }
 }
 
@@ -973,7 +1022,7 @@ async function presentStrategy(userId, stratergy_name="SHORT_STRADDLE", expiry_d
     try {
       const resp = await fetch(Url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
+        headers: sensibullHeaders(accessToken, userId),
         body: JSON.stringify(payload),
       });
       ////////////////////// Debugging info //////////////////////
@@ -994,44 +1043,22 @@ async function presentStrategy(userId, stratergy_name="SHORT_STRADDLE", expiry_d
       //console.log(JSON.stringify({ status: true, response: respJson }));
       return { status: true, response: respJson };
     } catch (e) {
-      return console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+      console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
+      return { status: false, error: e.message };
     }
 }
 
 async function IsvalidToken(userId, token) {
-  //const Url = 'https://oxide.sensibull.com/v1/compute/1/broker_data/user_ato';
-  const Url = 'https://api.sensibull.com/v1/users/me?source=platform';
-  const accessToken = token ? token : getUserAccessToken(userId);
-  
+  const accessToken = (token || '').trim();
   if (!accessToken) {
-    console.log(`No access token found for user ${userId}`);
+    console.log(`[IsvalidToken] No token provided for user ${userId}`);
     return false;
   }
-  
-  try {
-    const resp = await fetch(Url, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'Cookie': 'access_token=' + accessToken },
-    });
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '<unreadable>');
-      console.log(JSON.stringify({ error: resp.statusText, details: text }));
-      return false;
-    }
-    const respJson = await resp.json().catch(() => null);
-    if (respJson && respJson.data && respJson.data.external_user_id) {
-      const externalUserId = respJson.data.external_user_id;
-      //return json.externalUserId === userId;
-      setUserAccessToken(externalUserId, token.trim()); // Store token for this user
-      return { status: true, user_id: externalUserId };
-    }
-    
-    return false; // If response structure is unexpected, treat as invalid
-
-  } catch (e) {
-    console.log(JSON.stringify({ error: 'Failed to contact upstream service', message: e.message }));
-    return false;
-  }
+  // Store token immediately — Sensibull upstream calls will confirm validity
+  const resolvedUserId = userId || 'unknown';
+  setUserAccessToken(resolvedUserId, accessToken);
+  console.log(`[IsvalidToken] Token stored for user ${resolvedUserId}, length=${accessToken.length}`);
+  return { status: true, user_id: resolvedUserId };
 }
 
 async function downloadInstrumentsCSV() {

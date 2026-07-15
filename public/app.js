@@ -22,6 +22,25 @@ const sellSlStatusEl = document.getElementById('sell-sl-status');
 const userSelect = document.getElementById('user-select');
 const switchUserBtn = document.getElementById('switch-user-btn');
 let currentUser = localStorage.getItem('currentUser') || null;
+let accessToken  = localStorage.getItem('accessToken')  || null;
+
+// After Kite OAuth callback, ?user=XXX&token=YYY — store both and clean URL
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  const cbUser  = params.get('user');
+  const cbToken = params.get('token');
+  if (cbUser) {
+    currentUser = cbUser;
+    localStorage.setItem('currentUser', cbUser);
+  }
+  if (cbToken) {
+    accessToken = cbToken;
+    localStorage.setItem('accessToken', cbToken);
+  }
+  if (cbUser || cbToken) {
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+})();
 
 // Initialise username label from persisted session
 (function () {
@@ -32,6 +51,11 @@ let currentUser = localStorage.getItem('currentUser') || null;
 function setCurrentUser(username) {
   currentUser = username;
   localStorage.setItem('currentUser', username);
+  // Clear stored token when switching user — new login required
+  if (accessToken && username !== localStorage.getItem('currentUser')) {
+    accessToken = null;
+    localStorage.removeItem('accessToken');
+  }
   userSelect.value = username;
   const label = document.getElementById('username-label');
   if (label) label.textContent = username || 'Guest';
@@ -64,23 +88,18 @@ authBtn.addEventListener('click', async () => {
       setStatus('Please select a user before authenticating', true);
       return;
     }
-
-    const secretKey = prompt('Enter the secret key to Authenticate:');
-    if (!secretKey || !secretKey.trim()) {
-      setStatus('Authentication cancelled: secret key is required', true);
-      return;
-    }
-
     setCurrentUser(selectedUser);
-    const res = await postJSON(`${API}/authenticate`, { secretkey: secretKey, userId: selectedUser });
-    setCurrentUser(res.user);
-    await refresh();
-    await loadOrders();
-    setStatus(`${res.message}`, false);
+    const res = await getJSON(`${API}/kite-login-url?userId=${encodeURIComponent(selectedUser)}`);
+    if (res.url) {
+      window.location.href = res.url;
+    } else {
+      setStatus('Failed to get Kite login URL', true);
+    }
   } catch (e) {
     setStatus(parseError(e), true);
   }
 });
+
 
 /*getPortfolioBtn.addEventListener('click', async () => {
   try {
@@ -259,10 +278,12 @@ function td(text) {
 }
 
 function authHeaders(baseHeaders = {}) {
-  return {
+  const headers = {
     ...baseHeaders,
     'X-User-Id': currentUser || ''
   };
+  if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+  return headers;
 }
 
 // --- helpers ---

@@ -709,7 +709,7 @@ setInterval(async () => {
   try {
     // return; // <-- disable auto-exit for now
     // Iterate through all users and check their portfolios
-    for (const [userId, portfolioId] of userPortfolios.entries()) {
+    for (const [userId] of userAccessTokens.entries()) {
       // Refresh portfolio and pending orders in parallel. pendingOrdersmap() updates
       // pendingOrders to only OPEN statuses, which removes CANCELLED/REJECTED keys.
       const [{ portfolioData }] = await Promise.all([

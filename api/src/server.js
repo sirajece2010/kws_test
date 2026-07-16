@@ -1140,8 +1140,11 @@ const sslOptions = {
   key:  fs.readFileSync(new URL('../key.pem',  import.meta.url)),
   cert: fs.readFileSync(new URL('../cert.pem', import.meta.url)),
 };
+const { networkInterfaces } = await import('os');
+const _hostIp = Object.values(networkInterfaces()).flat().find(a => a.family === 'IPv4' && !a.internal)?.address || 'localhost';
+
 https.createServer(sslOptions, app).listen(httpsPort, () => {
-  console.log(`Device Inventory listening on https://localhost:${httpsPort}`);
+  console.log(`Device Inventory listening on https://${_hostIp}:${httpsPort}`);
 });
 
 // HTTP server — redirects all traffic to HTTPS
@@ -1150,5 +1153,5 @@ http.createServer((req, res) => {
   res.writeHead(301, { Location: `https://${host}:${httpsPort}${req.url}` });
   res.end();
 }).listen(httpPort, () => {
-  console.log(`HTTP on port ${httpPort} → redirecting to https://localhost:${httpsPort}`);
+  console.log(`HTTP on port ${httpPort} → redirecting to https://${_hostIp}:${httpsPort}`);
 });

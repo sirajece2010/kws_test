@@ -333,7 +333,7 @@ app.get('/api/kite-callback', async (req, res, next) => {
     });
 
     const tokenText = await tokenResp.text();
-    console.log(`[kite-callback] Token exchange status: ${tokenResp.status}, body: ${tokenText}`);
+    //console.log(`[kite-callback] Token exchange status: ${tokenResp.status}, body: ${tokenText}`);
 
     if (!tokenResp.ok) {
       return res.status(tokenResp.status).send('Token exchange failed: ' + tokenText);
@@ -351,7 +351,7 @@ app.get('/api/kite-callback', async (req, res, next) => {
     setUserAccessToken(kiteUserId, accessToken);
     req.session.userId = kiteUserId;
     req.session.authenticatedAt = Date.now();
-    console.log(`[kite-callback] Authenticated user ${kiteUserId}, token length=${accessToken.length}`);
+    //console.log(`[kite-callback] Authenticated user ${kiteUserId}, token length=${accessToken.length}`);
 
     // Redirect to app — frontend picks up user + token from URL params
     res.redirect(`/?user=${encodeURIComponent(kiteUserId)}&token=${encodeURIComponent(accessToken)}`);
@@ -937,7 +937,7 @@ async function portfolioDetails(userId) {
         headers: sensibullHeaders(accessToken, userId),
       });
       const respText = await resp.text().catch(() => '{}');
-      console.log(`[portfolioDetails] status=${resp.status} body=${respText.slice(0, 200)}`);
+      //console.log(`[portfolioDetails] status=${resp.status} body=${respText.slice(0, 200)}`);
       if (!resp.ok) {
         console.log(JSON.stringify({ error: resp.statusText, details: respText }));
         return { portfolioData: null };

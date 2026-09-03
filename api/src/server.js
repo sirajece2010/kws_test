@@ -266,6 +266,20 @@ app.put('/api/settings/sell-sl-percent', (req, res) => {
   return res.json({ sellSlPercent: SELL_SL_PERCENT });
 });
 
+app.get('/api/settings/buy-sl-percent', (_req, res) => {
+  res.json({ buySlPercent: BUY_SL_PERCENT, min: 0.6, max: 1 });
+});
+
+app.put('/api/settings/buy-sl-percent', (req, res) => {
+  const value = Number(req.body?.buySlPercent);
+  if (Number.isNaN(value) || value < 0.6 || value > 1) {
+    return res.status(400).json({ error: 'buySlPercent must be between 0.6 and 1' });
+  }
+
+  BUY_SL_PERCENT = Math.round(value * 100) / 100;
+  return res.json({ buySlPercent: BUY_SL_PERCENT });
+});
+
 app.post('/api/authenticate', async (req, res, next) => {
   try {
     const { secretkey } = req.body;

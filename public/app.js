@@ -15,9 +15,15 @@ const toggleBtn = document.getElementById('theme-toggle');
 const obody = document.getElementById('obody');
 const refreshOrdersBtn = document.getElementById('refresh-orders-btn');
 const ordersStatusEl = document.getElementById('orders-status');
+// Sell SL elements
 const sellSlInput = document.getElementById('sell-sl-input');
 const saveSellSlBtn = document.getElementById('save-sell-sl-btn');
 const sellSlStatusEl = document.getElementById('sell-sl-status');
+// Buy SL elements
+const buySlInput = document.getElementById('buy-sl-input');
+const saveBuySlBtn = document.getElementById('save-buy-sl-btn');
+const buySlStatusEl = document.getElementById('buy-sl-status');
+
 
 const userSelect = document.getElementById('user-select');
 const switchUserBtn = document.getElementById('switch-user-btn');
@@ -355,6 +361,21 @@ async function loadSellSLPercent() {
   }
 }
 
+async function loadBuySLPercent() {
+  if (!buySlInput) return;
+  try {
+    const res = await getJSON(`${API}/settings/buy-sl-percent`);
+    if (typeof res.buySlPercent === 'number') {
+      buySlInput.value = String(res.buySlPercent);
+    }
+  } catch (e) {
+    if (buySlStatusEl) {
+      buySlStatusEl.textContent = `Failed to load BUY SL: ${parseError(e)}`;
+      buySlStatusEl.className = 'error';
+    }
+  }
+}
+
 saveSellSlBtn?.addEventListener('click', async () => {
   try {
     const nextValue = Number(sellSlInput?.value);
@@ -380,6 +401,35 @@ saveSellSlBtn?.addEventListener('click', async () => {
     if (sellSlStatusEl) {
       sellSlStatusEl.textContent = parseError(e);
       sellSlStatusEl.className = 'error';
+    }
+  }
+});
+
+saveBuySlBtn?.addEventListener('click', async () => {
+  try {
+    const nextValue = Number(buySlInput?.value);
+    if (Number.isNaN(nextValue) || nextValue < 0.6 || nextValue > 1) {
+      if (buySlStatusEl) {
+        buySlStatusEl.textContent = 'BUY SL must be between 0.6 and 1';
+        buySlStatusEl.className = 'error';
+      }
+      return;
+    }
+
+    const res = await putJSON(`${API}/settings/buy-sl-percent`, {
+      buySlPercent: nextValue
+    });
+
+    if (buySlStatusEl) {
+      buySlStatusEl.textContent = `BUY SL updated to ${res.buySlPercent}`;
+      buySlStatusEl.className = 'success';
+    }
+
+    await refresh();
+  } catch (e) {
+    if (buySlStatusEl) {
+      buySlStatusEl.textContent = parseError(e);
+      buySlStatusEl.className = 'error';
     }
   }
 });
@@ -504,5 +554,11 @@ loadSellSLPercent().catch(err => {
   if (sellSlStatusEl) {
     sellSlStatusEl.textContent = parseError(err);
     sellSlStatusEl.className = 'error';
+  }
+});
+loadBuySLPercent().catch(err => {
+  if (buySlStatusEl) {
+    buySlStatusEl.textContent = parseError(err);
+    buySlStatusEl.className = 'error';
   }
 });

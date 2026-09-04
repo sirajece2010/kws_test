@@ -4,12 +4,14 @@ import morgan from 'morgan';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { init, all, get, run } from './db.js';
+import { getCasCandles, getCasTicks } from './postgres.js';
 import OTPLib from 'otplib';
 import { runInThisContext } from 'vm';
 import session from 'express-session';
 import https from 'https';
 import http from 'http';
 import fs from 'fs';
+import { spawn } from 'child_process';
 
 const app = express();
 app.use(morgan('dev'));
@@ -47,6 +49,7 @@ for (const dirPath of possiblePaths) {
 }
 console.log('Serving static from:', publicDirResolved); // <-- add this for debug
 app.use(express.static(publicDirResolved));
+app.use('/vendor/lightweight-charts', express.static(path.resolve(__dirname, '../node_modules/lightweight-charts/dist')));
 
 await init();
 await downloadInstrumentsCSV(); // Download instruments CSV once at startup
@@ -59,7 +62,15 @@ const userSessionCookies = new Map();       // userId -> { client_info, bkd_ref 
 const pendingOrders = new Map();            // userId -> Set of pending order keys (symbol_action)
 const instrumentsMap = {};                  // tradingsymbol -> instrument info
 let SELL_SL_PERCENT = 1.5;                  // Stop Loss percentage for SELL positions (150% of avg price)
-let BUY_SL_PERCENT = 0.33;                  // Stop Loss percentage for BUY positions (33% of avg price)
+let BUY_SL_PERCENT = 0.80;                  // Stop Loss percentage for BUY positions (33% of avg price)
+const casSymbolsFile = path.join(__dirname, 'cas_symbols.json');
+const casScript = path.join(__dirname, 'CAS_logic.py');
+const casPython = process.env.CAS_PYTHON || path.resolve(__dirname, '../../.venv/bin/python');
+let casProcess = null;
+
+function getCasProcessStatus() {
+  return { running: Boolean(casProcess && casProcess.exitCode === null) };
+}
 
 function setUserSessionCookies(userId, cookies = {}) {
   if (userId) userSessionCookies.set(userId, cookies);
@@ -249,6 +260,75 @@ app.get('/api/health', async (_req, res) => {
     res.json({ status: 'ok', db: 'connected' });
   } catch (e) {
     res.status(500).json({ status: 'error', message: e.message });
+  }
+});
+
+app.get('/api/cas/ticks', async (req, res, next) => {
+  try {
+    const requestedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 500)
+      : 100;
+    const rows = await getCasTicks(limit);
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/cas/candles', async (req, res, next) => {
+  try {
+    const interval = ['1 min', '3 min', '5 min'].includes(req.query.interval)
+      ? req.query.interval
+      : '3 min';
+    const rows = await getCasCandles(interval);
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/cas/collector', (_req, res) => {
+  res.json(getCasProcessStatus());
+});
+
+app.post('/api/cas/collector/start', (_req, res) => {
+  if (getCasProcessStatus().running) return res.json(getCasProcessStatus());
+
+  casProcess = spawn(casPython, [casScript], { stdio: 'ignore' });
+  casProcess.once('exit', () => { casProcess = null; });
+  casProcess.once('error', () => { casProcess = null; });
+  return res.status(202).json(getCasProcessStatus());
+});
+
+app.post('/api/cas/collector/stop', (_req, res) => {
+  if (getCasProcessStatus().running) casProcess.kill('SIGTERM');
+  return res.status(202).json(getCasProcessStatus());
+});
+
+app.get('/api/cas/symbols', (_req, res, next) => {
+  try {
+    const symbols = JSON.parse(fs.readFileSync(casSymbolsFile, 'utf8')).symbols || {};
+    res.json({ symbols });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/api/cas/symbols', (req, res, next) => {
+  const instrumentToken = String(req.body?.instrumentToken || '').trim();
+  const symbol = String(req.body?.symbol || '').trim();
+  if (!/^\d+$/.test(instrumentToken) || !symbol) {
+    return res.status(400).json({ error: 'instrumentToken must be numeric and symbol is required.' });
+  }
+
+  try {
+    const symbols = JSON.parse(fs.readFileSync(casSymbolsFile, 'utf8')).symbols || {};
+    symbols[instrumentToken] = symbol;
+    fs.writeFileSync(casSymbolsFile, `${JSON.stringify({ symbols }, null, 2)}\n`);
+    return res.status(201).json({ instrumentToken, symbol });
+  } catch (err) {
+    next(err);
   }
 });
 

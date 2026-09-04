@@ -19,6 +19,12 @@
     .primary-panel.active { display: block; }
     .subtab-panel { display: none; }
     .subtab-panel.active { display: block; }
+    .candlestick-chart { display: none; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+    .candlestick-chart.active { display: grid; }
+    .candlestick-chart-tile { border: 1px solid #ddd; background: #fff; min-width: 0; }
+    .candlestick-chart-title { margin: 0; padding: 8px 10px; font-size: 14px; border-bottom: 1px solid #ddd; }
+    .candlestick-chart-host { height: 280px; width: 100%; }
+    .candlestick-table.hidden { display: none; }
     .dummy-card { border: 1px solid #e6dede; background: #fffafa; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
     .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
     input, button { padding: 8px; }
@@ -92,6 +98,7 @@
     <a href="#panel-reports" data-tab-target="panel-reports">Reports</a>
     <a href="#panel-settings" data-tab-target="panel-settings">Settings</a>
     <a href="#panel-kite-app" data-tab-target="panel-kite-app">KITE APP</a>
+    <a href="#panel-cas-app" data-tab-target="panel-cas-app">CAS Logic</a>
   </nav>
 
   <div class="controls" style="position: fixed; bottom: 20px; left: 20px; width: auto;">
@@ -281,7 +288,84 @@
     </div>
   </section>
 
+  <section class="primary-panel" id="panel-cas-app">
+    <div class="subtabs" role="tablist" aria-label="CAS App Tabs" data-subtabs>
+      <button class="subtab-btn active" type="button" role="tab" aria-selected="true" data-subtab-target="cas-overview">Overview</button>
+      <button class="subtab-btn" type="button" role="tab" aria-selected="false" data-subtab-target="cas-candle">Candlestick</button>
+    </div>
+
+    <div class="subtab-panel active" id="cas-overview">
+      <div class="order-card">
+        <div class="controls">
+          <button id="refresh-cas-btn" type="button">Refresh CAS Data</button>
+          <button id="start-cas-collector-btn" type="button">Start Collector</button>
+          <button id="stop-cas-collector-btn" type="button">Stop Collector</button>
+          <span id="cas-collector-status" class="muted"></span>
+          <span id="cas-status" class="muted"></span>
+        </div>
+        <form id="cas-symbol-form" class="controls">
+          <input id="cas-instrument-token" type="text" inputmode="numeric" placeholder="Instrument token" required />
+          <input id="cas-symbol-name" type="text" placeholder="Symbol" required />
+          <button type="submit">Add Symbol</button>
+        </form>
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Symbol</th>
+              <th>LTP</th>
+              <th>Open</th>
+              <th>High</th>
+              <th>Low</th>
+              <th>Close</th>
+              <th>Volume</th>
+              <th>Change</th>
+              <th>Change Delta</th>
+              <th>Volume Delta</th>
+              <th>Recommendation</th>
+            </tr>
+          </thead>
+          <tbody id="cas-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="subtab-panel" id="cas-candle">
+      <div class="candlestick-card">
+        <h2>Candlestick</h2>
+        <div class="controls">
+          <label for="cas-candle-interval">Interval</label>
+          <select id="cas-candle-interval">
+            <option value="1 min">1 min</option>
+            <option value="3 min" selected>3 min</option>
+            <option value="5 min">5 min</option>
+          </select>
+          <div class="subtabs" role="group" aria-label="Candlestick display mode" style="margin-bottom: 0;">
+            <button class="subtab-btn active" type="button" data-candle-view="table" aria-pressed="true">Table</button>
+            <button class="subtab-btn" type="button" data-candle-view="chart" aria-pressed="false">Chart</button>
+          </div>
+        </div>
+        <div id="cas-candle-chart" class="candlestick-chart" aria-label="Candlestick chart"></div>
+        <table id="cas-candle-table" class="candlestick-table">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Symbol</th>
+              <th>Open</th>
+              <th>High</th>
+              <th>Low</th>
+              <th>Close</th>
+              <th>Volume</th>
+            </tr>
+          </thead>
+          <tbody id="cas-candle-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <!-- Put script here, not inside the table -->
+  <script src="/vendor/lightweight-charts/lightweight-charts.standalone.production.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

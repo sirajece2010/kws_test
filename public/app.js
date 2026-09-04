@@ -15,6 +15,20 @@ const toggleBtn = document.getElementById('theme-toggle');
 const obody = document.getElementById('obody');
 const refreshOrdersBtn = document.getElementById('refresh-orders-btn');
 const ordersStatusEl = document.getElementById('orders-status');
+const casTbody = document.getElementById('cas-tbody');
+const refreshCasBtn = document.getElementById('refresh-cas-btn');
+const casStatusEl = document.getElementById('cas-status');
+const startCasCollectorBtn = document.getElementById('start-cas-collector-btn');
+const stopCasCollectorBtn = document.getElementById('stop-cas-collector-btn');
+const casCollectorStatusEl = document.getElementById('cas-collector-status');
+const casSymbolForm = document.getElementById('cas-symbol-form');
+const casInstrumentToken = document.getElementById('cas-instrument-token');
+const casSymbolName = document.getElementById('cas-symbol-name');
+const casCandleTbody = document.getElementById('cas-candle-tbody');
+const casCandleInterval = document.getElementById('cas-candle-interval');
+const casCandleTable = document.getElementById('cas-candle-table');
+const casCandleChart = document.getElementById('cas-candle-chart');
+const casCandleViewButtons = document.querySelectorAll('[data-candle-view]');
 // Sell SL elements
 const sellSlInput = document.getElementById('sell-sl-input');
 const saveSellSlBtn = document.getElementById('save-sell-sl-btn');
@@ -497,6 +511,301 @@ function initSubtabs() {
 
 initPrimaryNavigation();
 initSubtabs();
+
+document.querySelector('[data-tab-target="panel-cas-app"]')?.addEventListener('click', () => {
+  loadCasTicks();
+  loadCasCollectorStatus();
+});
+
+refreshCasBtn?.addEventListener('click', () => loadCasTicks());
+
+startCasCollectorBtn?.addEventListener('click', async () => {
+  try {
+    await postJSON(`${API}/cas/collector/start`);
+    await loadCasCollectorStatus();
+  } catch (e) {
+    setCasCollectorStatus(parseError(e), true);
+  }
+});
+
+stopCasCollectorBtn?.addEventListener('click', async () => {
+  try {
+    await postJSON(`${API}/cas/collector/stop`);
+    await loadCasCollectorStatus();
+  } catch (e) {
+    setCasCollectorStatus(parseError(e), true);
+  }
+});
+
+casSymbolForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const result = await postJSON(`${API}/cas/symbols`, {
+      instrumentToken: casInstrumentToken?.value,
+      symbol: casSymbolName?.value
+    });
+    casSymbolForm.reset();
+    setCasCollectorStatus(`${result.symbol} will be subscribed on the next collector cycle.`, false);
+  } catch (e) {
+    setCasCollectorStatus(parseError(e), true);
+  }
+});
+
+document.querySelector('[data-subtab-target="cas-candle"]')?.addEventListener('click', () => {
+  loadCasCandles();
+});
+
+casCandleInterval?.addEventListener('change', () => {
+  loadCasCandles();
+});
+
+casCandleViewButtons.forEach((button) => {
+  button.addEventListener('click', () => setCasCandleView(button.dataset.candleView));
+});
+
+let casLoadInFlight = false;
+let casCandleLoadInFlight = false;
+let casCandles = [];
+let casCandleChartInstances = [];
+
+function setCasCollectorStatus(message, isError) {
+  if (!casCollectorStatusEl) return;
+  casCollectorStatusEl.textContent = message;
+  casCollectorStatusEl.className = isError ? 'error' : 'success';
+}
+
+async function loadCasCollectorStatus() {
+  try {
+    const { running } = await getJSON(`${API}/cas/collector`);
+    startCasCollectorBtn.disabled = running;
+    stopCasCollectorBtn.disabled = !running;
+    setCasCollectorStatus(running ? 'Collector running' : 'Collector stopped', false);
+  } catch (e) {
+    setCasCollectorStatus(`Collector status unavailable: ${parseError(e)}`, true);
+  }
+}
+
+function formatCasTime(value) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(date);
+}
+
+function isCasAutoRefreshWindow() {
+  const timeParts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+  const hour = Number(timeParts.find(({ type }) => type === 'hour')?.value);
+  const minute = Number(timeParts.find(({ type }) => type === 'minute')?.value);
+  const currentMinute = hour * 60 + minute;
+  //return currentMinute >= 14 * 60 + 55 && currentMinute < 15 * 60 + 40;
+  return currentMinute >= 10 * 60 + 24 && currentMinute < 15 * 60 + 50;
+}
+
+async function loadCasTicks() {
+  if (!casTbody || !casStatusEl || casLoadInFlight) return;
+
+  casLoadInFlight = true;
+  void loadCasCandles();
+  casStatusEl.textContent = 'Loading...';
+  casStatusEl.className = 'muted';
+  try {
+    const rows = await getJSON(`${API}/cas/ticks?limit=10`);
+    casTbody.innerHTML = '';
+
+    if (rows.length === 0) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 12;
+      cell.textContent = 'No CAS data found.';
+      cell.style.textAlign = 'center';
+      row.appendChild(cell);
+      casTbody.appendChild(row);
+    } else {
+      rows.forEach((tick) => {
+        const row = document.createElement('tr');
+        var direction = Number(tick.change_delta) > 0 ? 'Long' : Number(tick.change_delta) < 0 ? 'Short' : 'Neutral';
+        if (tick.symbol.endsWith("PE")) direction = direction === 'Long' ? 'Short' : direction === 'Short' ? 'Long' : 'Neutral';
+        [
+          formatCasTime(tick.time),
+          tick.symbol,
+          tick.ltp,
+          tick.open,
+          tick.high,
+          tick.low,
+          tick.close,
+          tick.volume,
+          tick.change,
+          tick.change_delta,
+          tick.volume_delta,
+          direction
+        ].forEach((value, index) => {
+          const cell = td(value ?? '—');
+          if (index === 11) {
+            cell.style.color = direction === 'Long' ? 'green' : direction === 'Short' ? 'red' : 'grey';
+            cell.style.fontWeight = '600';
+          }
+          row.appendChild(cell);
+        });
+        casTbody.appendChild(row);
+      });
+    }
+    casStatusEl.textContent = `${rows.length} row(s) loaded.`;
+    casStatusEl.className = 'success';
+  } catch (e) {
+    casStatusEl.textContent = `Failed to load CAS data: ${parseError(e)}`;
+    casStatusEl.className = 'error';
+  } finally {
+    casLoadInFlight = false;
+  }
+}
+
+async function loadCasCandles() {
+  if (!casCandleTbody || casCandleLoadInFlight) return;
+
+  casCandleLoadInFlight = true;
+  try {
+    const interval = encodeURIComponent(casCandleInterval?.value || '3 min');
+    const rows = await getJSON(`${API}/cas/candles?interval=${interval}`);
+    casCandles = rows;
+    casCandleTbody.innerHTML = '';
+
+    if (rows.length === 0) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 7;
+      cell.textContent = 'No candlestick data found for the last 15 minutes.';
+      cell.style.textAlign = 'center';
+      row.appendChild(cell);
+      casCandleTbody.appendChild(row);
+      return;
+    }
+
+    rows.forEach((candle) => {
+      const row = document.createElement('tr');
+      [
+        formatCasTime(candle.tm),
+        candle.symbol,
+        candle.open,
+        candle.high,
+        candle.low,
+        candle.close,
+        candle.volume
+      ].forEach((value) => row.appendChild(td(value ?? '—')));
+      casCandleTbody.appendChild(row);
+    });
+    renderCasCandleChart();
+  } catch (e) {
+    casCandleTbody.innerHTML = '';
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 7;
+    cell.textContent = `Failed to load candlestick data: ${parseError(e)}`;
+    cell.className = 'error';
+    row.appendChild(cell);
+    casCandleTbody.appendChild(row);
+  } finally {
+    casCandleLoadInFlight = false;
+  }
+}
+
+function setCasCandleView(view) {
+  const showChart = view === 'chart';
+  casCandleViewButtons.forEach((button) => {
+    const isActive = button.dataset.candleView === view;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-pressed', String(isActive));
+  });
+  casCandleTable?.classList.toggle('hidden', showChart);
+  casCandleChart?.classList.toggle('active', showChart);
+  if (showChart) renderCasCandleChart();
+}
+
+function renderCasCandleChart() {
+  if (!casCandleChart || !window.LightweightCharts) return;
+
+  casCandleChartInstances.forEach((chart) => chart.remove());
+  casCandleChartInstances = [];
+  casCandleChart.innerHTML = '';
+
+  const symbolWeights = new Map();
+  casCandles.forEach((candle) => {
+    const weight = Number(candle.weight);
+    if (candle.symbol && Number.isFinite(weight)) {
+      symbolWeights.set(candle.symbol, Math.max(symbolWeights.get(candle.symbol) ?? -Infinity, weight));
+    }
+  });
+  const symbols = [...new Set(casCandles.map((candle) => candle.symbol).filter(Boolean))]
+    .sort((first, second) => (symbolWeights.get(second) ?? 0) - (symbolWeights.get(first) ?? 0) || first.localeCompare(second));
+  symbols.forEach((symbol) => {
+    const candles = casCandles
+      .filter((candle) => candle.symbol === symbol)
+      .map((candle) => ({
+        time: Math.floor(new Date(candle.tm).getTime() / 1000),
+        open: Number(candle.open),
+        high: Number(candle.high),
+        low: Number(candle.low),
+        close: Number(candle.close)
+      }))
+      .filter((candle) => Number.isFinite(candle.time) && Object.values(candle).every((value) => typeof value === 'number' && Number.isFinite(value)))
+      .sort((first, second) => first.time - second.time);
+
+    if (!candles.length) return;
+
+    const tile = document.createElement('section');
+    tile.className = 'candlestick-chart-tile';
+    const title = document.createElement('h3');
+    title.className = 'candlestick-chart-title';
+    title.textContent = symbol;
+    const host = document.createElement('div');
+    host.className = 'candlestick-chart-host';
+    tile.append(title, host);
+    casCandleChart.appendChild(tile);
+
+    const chart = window.LightweightCharts.createChart(host, {
+      autoSize: true,
+      layout: { background: { color: '#ffffff' }, textColor: '#333333' },
+      timeScale: { timeVisible: true, secondsVisible: false },
+      localization: {
+        timeFormatter: (timestamp) => new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        }).format(new Date(timestamp * 1000))
+      }
+    });
+    const series = chart.addSeries(window.LightweightCharts.CandlestickSeries, {
+      upColor: '#0a7a2f',
+      downColor: '#c62828',
+      borderVisible: false,
+      wickUpColor: '#0a7a2f',
+      wickDownColor: '#c62828'
+    });
+    series.setData(candles);
+    chart.timeScale().fitContent();
+    casCandleChartInstances.push(chart);
+  });
+}
+
+setInterval(() => {
+  if (isCasAutoRefreshWindow()) loadCasTicks();
+}, 500);
 
 // Load orders when the Orders subtab is clicked
 document.querySelector('[data-subtab-target="inventory-orders"]')?.addEventListener('click', () => {

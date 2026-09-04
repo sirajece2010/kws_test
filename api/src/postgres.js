@@ -23,6 +23,17 @@ export async function getCasTicks(limit = 50) {
   return result.rows;
 }
 
+export async function getLatestNiftySpot() {
+  const result = await pool.query(
+    `SELECT ltp
+     FROM ticks
+     WHERE symbol = 'NIFTY 50'
+     ORDER BY time DESC
+     LIMIT 1`
+  );
+  return result.rows[0]?.ltp ?? null;
+}
+
 export async function getCasCandles(interval) {
   const result = await pool.query(
     `SELECT

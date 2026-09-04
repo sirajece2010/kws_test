@@ -4,7 +4,7 @@ import morgan from 'morgan';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { init, all, get, run } from './db.js';
-import { getCas1515Highs, getCasCandles, getCasTicks } from './postgres.js';
+import { getCas1515Highs, getCasCandles, getCasTicks, getLatestNiftySpot } from './postgres.js';
 import OTPLib from 'otplib';
 import { runInThisContext } from 'vm';
 import session from 'express-session';
@@ -67,10 +67,86 @@ const casSymbolsFile = path.join(__dirname, 'cas_symbols.json');
 const casScript = path.join(__dirname, 'CAS_logic.py');
 const casPython = process.env.CAS_PYTHON || path.resolve(__dirname, '../../.venv/bin/python');
 let casProcess = null;
+let casLegSelectionDate = null;
 
 function getCasProcessStatus() {
   return { running: Boolean(casProcess && casProcess.exitCode === null) };
 }
+
+function getIstTimeParts() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+  return Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+}
+
+async function getNiftyOptionContracts() {
+  const csv = (await import('csv-parser')).default;
+  const contracts = [];
+  await new Promise((resolve, reject) => {
+    fs.createReadStream(path.resolve(__dirname, '../instruments.csv'))
+      .pipe(csv())
+      .on('data', (row) => {
+        if (row.name === 'NIFTY' && (row.instrument_type === 'CE' || row.instrument_type === 'PE')) {
+          contracts.push({
+            instrumentToken: Number(row.instrument_token),
+            symbol: row.tradingsymbol,
+            expiry: row.expiry,
+            strike: Number(row.strike),
+            type: row.instrument_type
+          });
+        }
+      })
+      .on('end', resolve)
+      .on('error', reject);
+  });
+  return contracts;
+}
+
+async function selectCasNiftyLegs() {
+  const spot = Number(await getLatestNiftySpot());
+  if (!Number.isFinite(spot) || spot <= 0) throw new Error('A current NIFTY 50 LTP is required before selecting CAS legs.');
+
+  const today = new Date().toISOString().slice(0, 10);
+  const contracts = (await getNiftyOptionContracts())
+    .filter((contract) => Number.isFinite(contract.instrumentToken) && Number.isFinite(contract.strike) && contract.expiry >= today);
+  const expiry = [...new Set(contracts.map((contract) => contract.expiry))].sort()[0];
+  const expiryContracts = contracts.filter((contract) => contract.expiry === expiry);
+  const strikes = [...new Set(expiryContracts.map((contract) => contract.strike))].sort((first, second) => first - second);
+  const atmIndex = strikes.reduce((bestIndex, strike, index) => Math.abs(strike - spot) < Math.abs(strikes[bestIndex] - spot) ? index : bestIndex, 0);
+  const callStrike = strikes[atmIndex - 1];
+  const putStrike = strikes[atmIndex + 1];
+  const call = expiryContracts.find((contract) => contract.type === 'CE' && contract.strike === callStrike);
+  const put = expiryContracts.find((contract) => contract.type === 'PE' && contract.strike === putStrike);
+
+  if (!call || !put) throw new Error('Could not find a complete one-strike ITM NIFTY CE/PE pair for the nearest expiry.');
+
+  const symbols = {
+    [call.instrumentToken]: call.symbol,
+    [put.instrumentToken]: put.symbol
+  };
+  fs.writeFileSync(casSymbolsFile, `${JSON.stringify({ symbols }, null, 2)}\n`);
+  return { spot, expiry, call, put };
+}
+
+setInterval(() => {
+  const ist = getIstTimeParts();
+  const date = `${ist.year}-${ist.month}-${ist.day}`;
+  if (ist.hour === '15' && ist.minute === '14' && casLegSelectionDate !== date) {
+    selectCasNiftyLegs()
+      .then(({ call, put }) => {
+        casLegSelectionDate = date;
+        console.log(`CAS legs selected: ${call.symbol} and ${put.symbol}`);
+      })
+      .catch((err) => console.error('Unable to select CAS NIFTY legs:', err.message));
+  }
+}, 10_000);
 
 function setUserSessionCookies(userId, cookies = {}) {
   if (userId) userSessionCookies.set(userId, cookies);

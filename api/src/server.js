@@ -4,7 +4,7 @@ import morgan from 'morgan';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { init, all, get, run } from './db.js';
-import { getCasCandles, getCasTicks } from './postgres.js';
+import { getCas1515Highs, getCasCandles, getCasTicks } from './postgres.js';
 import OTPLib from 'otplib';
 import { runInThisContext } from 'vm';
 import session from 'express-session';
@@ -283,6 +283,17 @@ app.get('/api/cas/candles', async (req, res, next) => {
       : '3 min';
     const rows = await getCasCandles(interval);
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/cas/trade-levels', (_req, res, next) => {
+  try {
+    const configuredSymbols = Object.values(JSON.parse(fs.readFileSync(casSymbolsFile, 'utf8')).symbols || {});
+    getCas1515Highs(configuredSymbols)
+      .then((rows) => res.json(rows))
+      .catch(next);
   } catch (err) {
     next(err);
   }

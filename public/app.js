@@ -567,6 +567,7 @@ let casLoadInFlight = false;
 let casCandleLoadInFlight = false;
 let casCandles = [];
 let casCandleChartInstances = [];
+let casTradeLevels = new Map();
 
 function setCasCollectorStatus(message, isError) {
   if (!casCollectorStatusEl) return;
@@ -603,6 +604,63 @@ function formatCasTime(value) {
   }).format(date);
 }
 
+function getCasIstDate() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
+}
+
+async function checkCasTradeTriggers(ticks) {
+  try {
+    const levels = await getJSON(`${API}/cas/trade-levels`);
+    casTradeLevels = new Map(levels.map((level) => [level.symbol, {
+      high: Number(level.trigger_high),
+      low: Number(level.trigger_low)
+    }]));
+    const istDate = getCasIstDate();
+
+    ticks.forEach((tick) => {
+      const triggerLevels = casTradeLevels.get(tick.symbol);
+      const ltp = Number(tick.ltp);
+      const confirmationKey = `cas-trade-confirmation:${istDate}:${tick.symbol}`;
+      const tickTime = new Date(tick.time).getTime();
+
+      if (Number.isFinite(triggerLevels?.high) && Number.isFinite(ltp) && Number.isFinite(tickTime) && ltp > triggerLevels.high && !localStorage.getItem(confirmationKey)) {
+        localStorage.setItem(confirmationKey, String(tickTime));
+      }
+
+      const breakoutTime = Number(localStorage.getItem(confirmationKey));
+      if (!Number.isFinite(breakoutTime)) return;
+      if (Date.now() - breakoutTime > 50_000) {
+        localStorage.removeItem(confirmationKey);
+        return;
+      }
+
+      const oppositeTick = ticks.find((candidate) => {
+        const oppositeLevels = casTradeLevels.get(candidate.symbol);
+        const candidateTime = new Date(candidate.time).getTime();
+        return candidate.symbol !== tick.symbol
+          && Number.isFinite(oppositeLevels?.low)
+          && Number(candidate.ltp) < oppositeLevels.low
+          && Number.isFinite(candidateTime)
+          && candidateTime >= breakoutTime
+          && candidateTime - breakoutTime <= 50_000;
+      });
+      const alertKey = `cas-trade-trigger:${istDate}:${tick.symbol}`;
+      if (oppositeTick && !localStorage.getItem(alertKey)) {
+        const oppositeLow = casTradeLevels.get(oppositeTick.symbol).low;
+        localStorage.setItem(alertKey, 'true');
+        window.alert(`${tick.symbol} crossed its 15:15 IST high and ${oppositeTick.symbol} broke its 15:15 IST low. LTPs: ${ltp} / ${oppositeTick.ltp}; levels: ${triggerLevels.high} / ${oppositeLow}`);
+      }
+    });
+  } catch (e) {
+    console.error('Unable to check CAS trade triggers:', e);
+  }
+}
+
 function isCasAutoRefreshWindow() {
   const timeParts = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Kolkata',
@@ -613,8 +671,8 @@ function isCasAutoRefreshWindow() {
   const hour = Number(timeParts.find(({ type }) => type === 'hour')?.value);
   const minute = Number(timeParts.find(({ type }) => type === 'minute')?.value);
   const currentMinute = hour * 60 + minute;
-  //return currentMinute >= 14 * 60 + 55 && currentMinute < 15 * 60 + 40;
-  return currentMinute >= 10 * 60 + 24 && currentMinute < 15 * 60 + 50;
+  return currentMinute >= 14 * 60 + 55 && currentMinute < 15 * 60 + 40;
+  //return currentMinute >= 10 * 60 + 24 && currentMinute < 15 * 60 + 50;
 }
 
 async function loadCasTicks() {
@@ -626,6 +684,7 @@ async function loadCasTicks() {
   casStatusEl.className = 'muted';
   try {
     const rows = await getJSON(`${API}/cas/ticks?limit=10`);
+    void checkCasTradeTriggers(rows);
     casTbody.innerHTML = '';
 
     if (rows.length === 0) {

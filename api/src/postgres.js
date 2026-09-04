@@ -32,14 +32,31 @@ export async function getCasCandles(interval) {
        high(candlestick_agg("time", ltp, volume)) AS high,
        low(candlestick_agg("time", ltp, volume)) AS low,
        close(candlestick_agg("time", ltp, volume)) AS close,
-       volume(candlestick_agg("time", ltp, volume)) AS volume,
+      MAX(volume) - MIN(volume) AS volume,
        MAX(weight) AS weight
      FROM ticks
-     WHERE "time" > now() - '15 min'::interval
+     WHERE "time" > now() - '1 day'::interval
      GROUP BY tm, symbol
       ORDER BY tm DESC, weight DESC`,
     [interval]
   );
   return result.rows;
 }
+
+export async function getCas1515Highs(symbols) {
+  if (!symbols.length) return [];
+
+  const result = await pool.query(
+    `SELECT symbol, MAX(ltp) AS trigger_high, MIN(ltp) AS trigger_low
+     FROM ticks
+     WHERE symbol = ANY($1)
+       AND ("time" AT TIME ZONE 'Asia/Kolkata')::date = (now() AT TIME ZONE 'Asia/Kolkata')::date
+       AND ("time" AT TIME ZONE 'Asia/Kolkata')::time >= TIME '15:15:00'
+       AND ("time" AT TIME ZONE 'Asia/Kolkata')::time < TIME '15:18:00'
+     GROUP BY symbol`,
+    [symbols]
+  );
+  return result.rows;
+}
+
 

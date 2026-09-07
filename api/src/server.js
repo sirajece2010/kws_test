@@ -120,8 +120,8 @@ async function selectCasNiftyLegs() {
   const expiryContracts = contracts.filter((contract) => contract.expiry === expiry);
   const strikes = [...new Set(expiryContracts.map((contract) => contract.strike))].sort((first, second) => first - second);
   const atmIndex = strikes.reduce((bestIndex, strike, index) => Math.abs(strike - spot) < Math.abs(strikes[bestIndex] - spot) ? index : bestIndex, 0);
-  const callStrike = strikes[atmIndex - 1];
-  const putStrike = strikes[atmIndex + 1];
+  const callStrike = strikes[atmIndex + 1]; // taking OTM call
+  const putStrike = strikes[atmIndex - 1]; // taking OTM put
   const call = expiryContracts.find((contract) => contract.type === 'CE' && contract.strike === callStrike);
   const put = expiryContracts.find((contract) => contract.type === 'PE' && contract.strike === putStrike);
 
@@ -885,6 +885,20 @@ app.delete('/api/devices/:id', async (req, res, next) => {
   }
 });
 
+// Developement enpoints
+// These endpoints are meant for internal testing and development purposes only.
+app.post('/api/cas/select-legs', async (_req, res, next) => {
+  try {
+    const result = await selectCasNiftyLegs();
+    res.json({
+      message: 'CAS NIFTY legs selected successfully.',
+      ...result
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Auto-exit monitor for stop-loss
 setInterval(async () => {
   try {
@@ -913,7 +927,7 @@ setInterval(async () => {
           hour12: false
         }).format(new Date());
         const [h, m] = istTime.split(':').map(Number);
-        const afterCutoff = (h * 60 + m) > (10 * 60 + 20) && (h * 60 + m) < (15 * 60 + 10); // after 10:20 AM and before 3:10 PM
+        const afterCutoff = (h * 60 + m) > (10 * 60 + 20) && (h * 60 + m) < (15 * 60 + 30); // after 10:20 AM and before 3:30 PM
 
         if (afterCutoff) {
           console.log('Running auto-exit monitor at', istTime);

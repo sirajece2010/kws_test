@@ -949,11 +949,13 @@ setInterval(async () => {
             continue;
           }
 
-          console.log(`Auto-exit triggered for ${position.symbol}: LTP=${position.ltp}, SL=${position.stop_loss} at time:${istTime}`);
+          //LTP round figure - round to nearest 0.05 (e.g., 54.32 -> 54.30, 54.33 -> 54.35)
+          var LTP = Math.round((position.ltp * 20).toFixed(2)) / 20
+          console.log(`Auto-exit triggered for ${position.symbol}: LTP=${LTP}, SL=${position.stop_loss} at time:${istTime}`);
           // console.log(`Position details:`, JSON.stringify(position)); // <-- debug log
 
           try {
-            const ret = await createOrderPayload(userId, exitType, position.symbol, exitQuantity, position.ltp);
+            const ret = await createOrderPayload(userId, exitType, position.symbol, exitQuantity, LTP);
 
             if (ret && ret.status) {
               console.log(`Successfully auto-exited ${position.symbol}`);
